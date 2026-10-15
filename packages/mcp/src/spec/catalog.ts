@@ -203,6 +203,8 @@ export function paramTypeText(ps: JsonSchema): string {
   if (ps.format === "duration") return "duration";
   if (ps.type === "array" && ps.minItems === 3 && ps.maxItems === 3) return "Vector3 [x,y,z]";
   if (ps.type === "array") return "array";
+  if (ps.type === "object" && ps.properties && typeof ps.properties === "object" && "pos" in ps.properties)
+    return "CFrame {pos, look}";
   if (typeof ps.type === "string") return ps.type;
   return "any";
 }
