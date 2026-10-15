@@ -5,3 +5,6 @@ coverage/
 .stagehand/runs/
 plugin/build/*.rbxm
 .DS_Store
+build/
+tools/run-in-roblox/target/
+examples/.stagehand/

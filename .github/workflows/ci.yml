@@ -112,3 +112,18 @@ jobs:
           name: Stagehand.rbxm
           path: Stagehand.rbxm
           if-no-files-found: error
+
+  run-in-roblox:
+    name: run-in-roblox (Rust fork, Linux/Wine launcher)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/run-in-roblox
+      - name: Build and test
+        working-directory: tools/run-in-roblox
+        run: |
+          cargo build --locked
+          cargo test --locked
