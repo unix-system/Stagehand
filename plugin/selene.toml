@@ -1,0 +1,7 @@
+std = "roblox"
+exclude = ["tests/**"]
+
+[lints]
+# Actions modules use `if script then require(script...) else require("./x")` so they also load
+# under Lune (tools/gen-catalog.luau, tests/); selene cannot see through that.
+shadowing = "allow"

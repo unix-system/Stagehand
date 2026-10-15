@@ -1,0 +1,10 @@
+[package]
+name = "stagehand/stagehand-plugin"
+description = "Stagehand Roblox Studio plugin: playtest node for the stagehand-mcp daemon"
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+private = true
+
+[dependencies]

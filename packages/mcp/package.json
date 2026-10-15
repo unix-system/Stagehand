@@ -1,0 +1,35 @@
+{
+  "name": "stagehand-mcp",
+  "version": "0.1.0",
+  "description": "Stagehand daemon: MCP server + HTTP broker that runs declarative playtests in Roblox Studio",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "stagehand-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-schema.mjs",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ajv": "^8.17.1",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
