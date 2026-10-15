@@ -48,7 +48,7 @@ local function send(method: string, variants: { { any } })
 		end
 		lastErr = err
 	end
-	Errors.throw("ACTION_ERROR", "VirtualInput:" .. method .. " failed: " .. tostring(lastErr))
+	return Errors.throw("ACTION_ERROR", "VirtualInput:" .. method .. " failed: " .. tostring(lastErr))
 end
 
 function Input.key(down: boolean, keyCode)
@@ -104,7 +104,7 @@ function Input.keyCode(code: string)
 	if ok and kc then
 		return kc
 	end
-	Errors.throw("BAD_PARAMS", "unknown KeyCode '" .. code .. "'")
+	return Errors.throw("BAD_PARAMS", "unknown KeyCode '" .. code .. "'")
 end
 
 --- Screen-space centre (viewport pixels, inset included) of a GuiObject or BasePart.

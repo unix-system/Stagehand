@@ -9,7 +9,7 @@ local Serialize = if script then require(script.Parent.Serialize) else require("
 
 local Inspect = {}
 
-local function describe(inst, depth: number, budget: { n: number }): any
+local function describe(inst, depth: number, budget: { n: number, truncated: boolean }): any
 	budget.n -= 1
 	local attrs = {}
 	local okA, map = pcall(function()

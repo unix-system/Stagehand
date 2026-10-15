@@ -30,7 +30,7 @@ Lua.shape = {
 
 local baseEnv = getfenv(1)
 
-function Lua.env(ctx, extra: { [string]: any }?): { [string]: any }
+function Lua.env(ctx, extra: { [string]: any }?): any
 	local player = ctx and ctx.player and ctx.player(false) or nil
 	local env = {
 		actor = player,
@@ -86,7 +86,7 @@ function Lua.run(ctx, code: string, extra: { [string]: any }?): any
 		if Errors.is(e) then
 			error(e, 0)
 		end
-		Errors.throw("LUA_ERROR", tostring(e))
+		return Errors.throw("LUA_ERROR", tostring(e))
 	end
 	return results[2]
 end
@@ -103,7 +103,7 @@ function Lua.code(params: any): string
 			return params.code.code
 		end
 	end
-	Errors.throw("BAD_PARAMS", "lua step needs params.code")
+	return Errors.throw("BAD_PARAMS", "lua step needs params.code")
 end
 
 return Lua

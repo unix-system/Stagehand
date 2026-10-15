@@ -16,7 +16,9 @@ return {
 			contexts = "subset of [edit, server, client]",
 			default = "one of contexts",
 			summary = "one line",
-			actor = "required | optional | none \u{2014} whether the step needs `as` (defaults to p1 when players = 1)",
+			actor = "required | optional | none "
+				.. utf8.char(0x2014)
+				.. " whether the step needs `as` (defaults to p1 when players = 1)",
 			params = "JSON Schema object; selector = {type:string, format:selector}; duration = {type:string, format:duration} (numbers = seconds also accepted); Vector3 = 3-number array",
 			returns = "optional JSON Schema of the value storable with `save`",
 			notes = "optional",

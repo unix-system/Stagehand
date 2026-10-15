@@ -4,6 +4,12 @@
 
 	Selectors are parsed into an AST and resolved lazily on every evaluation (conditions re-resolve
 	while polling). `ctx` supplies `vars` and `playerFor(actorName) -> Player?`.
+
+	Filter semantics (spec: "children matching property equality"):
+	  Name[k=v]  → children of Name that match   (Workspace.Enemies[Name=Boss] → Enemies.Boss)
+	  *[k=v]     → children that match           (Workspace.*[@Team=Red])
+	  **[k=v]    → descendants that match
+	Name matching is exact; the first segment of a path falls back to game:GetService(name).
 ]]
 
 local Env = if script then require(script.Parent.Env) else require("./Env")
@@ -247,39 +253,49 @@ end
 
 local function step(nodes: { any }, seg: Segment, isFirstPathSeg: boolean, isLast: boolean): { any }
 	local out, seen = {}, {}
-	local function add(x)
-		if not seen[x] and matchesFilters(x, seg.filters) then
+	local function add(x, filtered: boolean)
+		if not seen[x] and (not filtered or matchesFilters(x, seg.filters)) then
 			seen[x] = true
 			table.insert(out, x)
 		end
 	end
+	local hasFilters = #seg.filters > 0
 	for _, node in ipairs(nodes) do
 		if seg.wild == "*" then
 			for _, c in ipairs(children(node)) do
-				add(c)
+				add(c, hasFilters)
 			end
 		elseif seg.wild == "**" then
-			if not isLast then
-				add(node)
+			if not isLast and not hasFilters then
+				add(node, false)
 			end
 			local d = {}
 			descendantsInto(node, d)
 			for _, c in ipairs(d) do
-				add(c)
+				add(c, hasFilters)
 			end
 		else
-			local found = false
+			local named = {}
 			for _, c in ipairs(children(node)) do
 				if c.Name == seg.name then
-					found = true
-					add(c)
+					table.insert(named, c)
 				end
 			end
-			if not found and isFirstPathSeg then
+			if #named == 0 and isFirstPathSeg then
 				local svcName = if seg.name == "workspace" then "Workspace" else seg.name
 				local svc = Env.service(svcName :: string)
 				if svc then
-					add(svc)
+					table.insert(named, svc)
+				end
+			end
+			for _, m in ipairs(named) do
+				if hasFilters then
+					-- Name[k=v] selects Name's children that match
+					for _, c in ipairs(children(m)) do
+						add(c, true)
+					end
+				else
+					add(m, false)
 				end
 			end
 		end
@@ -347,7 +363,7 @@ local function resolveValue(v: any, ctx: any, depth: number): { any }
 	elseif type(v) == "string" then
 		local ast, err = Resolve.parse(v)
 		if not ast then
-			Errors.throw("RESOLVE_FAILED", err :: string, { selector = v })
+			return Errors.throw("RESOLVE_FAILED", err :: string, { selector = v })
 		end
 		return resolveAst(ast, ctx, depth + 1)
 	elseif type(v) == "table" then
@@ -359,7 +375,7 @@ local function resolveValue(v: any, ctx: any, depth: number): { any }
 		end
 		return out
 	end
-	Errors.throw("RESOLVE_FAILED", "value is not a selector or instance: " .. tostring(v))
+	return Errors.throw("RESOLVE_FAILED", "value is not a selector or instance: " .. tostring(v))
 end
 
 resolveAst = function(ast: Ast, ctx: any, depth: number?): { any }
@@ -715,7 +731,7 @@ function Resolve.applyParams(schema: any, raw: { [string]: any }?, vars: { [stri
 		local ok, res = pcall(Resolve.coerceParam, v, ps)
 		if not ok then
 			local e = Errors.from(res, "BAD_PARAMS")
-			Errors.throw("BAD_PARAMS", "param '" .. k .. "': " .. e.message, { param = k })
+			return Errors.throw("BAD_PARAMS", "param '" .. k .. "': " .. e.message, { param = k })
 		end
 		out[k] = res
 	end
@@ -747,7 +763,7 @@ function Resolve.toCFrame(v: any, ctx: any): any
 	if ok and pivot then
 		return pivot
 	end
-	Errors.throw("RESOLVE_FAILED", "cannot get a position from " .. tostring(v))
+	return Errors.throw("RESOLVE_FAILED", "cannot get a position from " .. tostring(v))
 end
 
 function Resolve.toVector3(v: any, ctx: any): any

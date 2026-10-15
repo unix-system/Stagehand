@@ -31,7 +31,7 @@ local function findRemote(ctx, name: string, classes: { string })
 			end
 		end
 		if not inst then
-			Errors.throw(
+			return Errors.throw(
 				"RESOLVE_FAILED",
 				"no " .. table.concat(classes, "/") .. " named '" .. name .. "' in ReplicatedStorage"
 			)
@@ -42,7 +42,7 @@ local function findRemote(ctx, name: string, classes: { string })
 			return inst
 		end
 	end
-	Errors.throw(
+	return Errors.throw(
 		"BAD_PARAMS",
 		inst:GetFullName() .. " is a " .. inst.ClassName .. ", expected " .. table.concat(classes, "/")
 	)

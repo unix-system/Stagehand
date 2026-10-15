@@ -24,7 +24,10 @@ local function findToolTemplate(ctx, name: string)
 			end
 		end
 	end
-	Errors.throw("RESOLVE_FAILED", "no Tool named '" .. name .. "' in ServerStorage, ReplicatedStorage or StarterPack")
+	return Errors.throw(
+		"RESOLVE_FAILED",
+		"no Tool named '" .. name .. "' in ServerStorage, ReplicatedStorage or StarterPack"
+	)
 end
 
 local function playerSignals(_ctx)
@@ -150,7 +153,7 @@ return {
 				local ls = player:FindFirstChild("leaderstats")
 				local stat = ls and ls:FindFirstChild(p.stat)
 				if not stat then
-					Errors.throw("RESOLVE_FAILED", "no leaderstats." .. p.stat .. " on " .. player.Name)
+					return Errors.throw("RESOLVE_FAILED", "no leaderstats." .. p.stat .. " on " .. player.Name)
 				end
 				stat.Value = p.value
 				return nil

@@ -54,30 +54,33 @@ end
 -- Invoke with a timeout (a hook bridge without OnInvoke would otherwise yield forever).
 local function invoke(bridge, request, timeout: number): (boolean, any)
 	local task = Env.task()
-	local done, ok, res = false, false, nil
+	local done, waiting, ok, res = false, false, false, nil
 	local thread = coroutine.running()
 	local timer
-	task.spawn(function()
-		ok, res = pcall(function()
-			return bridge:Invoke(request)
-		end)
-		if not done then
-			done = true
-			if timer then
-				pcall(task.cancel, timer)
-			end
+	local function finish(success: boolean, value: any)
+		if done then
+			return
+		end
+		done = true
+		ok, res = success, value
+		if timer and coroutine.running() ~= timer then
+			pcall(task.cancel, timer)
+		end
+		if waiting then
 			task.spawn(thread)
 		end
+	end
+	task.spawn(function()
+		finish(pcall(function()
+			return bridge:Invoke(request)
+		end))
 	end)
 	if done then
 		return ok, res
 	end
+	waiting = true
 	timer = task.delay(timeout, function()
-		if not done then
-			done = true
-			ok, res = false, "hook bridge did not answer within " .. timeout .. "s"
-			task.spawn(thread)
-		end
+		finish(false, "hook bridge did not answer within " .. timeout .. "s")
 	end)
 	coroutine.yield()
 	return ok, res

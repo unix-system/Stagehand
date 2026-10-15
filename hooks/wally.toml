@@ -1,0 +1,9 @@
+[package]
+name = "stagehand/stagehand-hooks"
+description = "Expose game-specific actions/conditions (game.*) to Stagehand playtests"
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]

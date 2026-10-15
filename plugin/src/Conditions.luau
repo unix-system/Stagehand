@@ -118,7 +118,7 @@ function Conditions.compare(op: string?, actual: any, expected: any): boolean
 		local ok, res = pcall(string.match, tostring(Serialize.value(actual)), tostring(expected))
 		return ok and res ~= nil
 	end
-	Errors.throw("BAD_PARAMS", "unknown op '" .. tostring(op) .. "'")
+	return Errors.throw("BAD_PARAMS", "unknown op '" .. tostring(op) .. "'")
 end
 
 --- Yield until any of `signals` fires, `maxWait` elapses, or `cancel` (a signal) fires.

@@ -162,6 +162,14 @@ end
 function Node:_attachOnce(): (boolean, string?)
 	local g = Env.game()
 	local playerName, userId = self:_identity()
+	local okId, placeId = pcall(function()
+		return g.PlaceId
+	end)
+	local okName, placeName = pcall(function()
+		return g.Name
+	end)
+	placeId = if okId and type(placeId) == "number" then placeId else 0
+	placeName = if okName and type(placeName) == "string" then placeName else ""
 	local body = Json.ordered({
 		"protocolVersion",
 		"role",
@@ -176,8 +184,8 @@ function Node:_attachOnce(): (boolean, string?)
 	}, {
 		protocolVersion = Node.PROTOCOL_VERSION,
 		role = self.role,
-		placeId = (g and g.PlaceId) or 0,
-		placeName = (g and g.Name) or "",
+		placeId = placeId,
+		placeName = placeName,
 		sessionId = orNull(self.sessionId),
 		playerName = orNull(playerName),
 		userId = orNull(userId),
@@ -208,6 +216,8 @@ function Node:_attachLoop(): boolean
 	while self.running do
 		local ok, err = self:_attachOnce()
 		if ok then
+			-- seq restarts at 1 per attach; unsent events are renumbered after node.ready
+			local pending = self.queue
 			self.seq = 0
 			self.queue = {}
 			self:_setState("attached", nil)
@@ -216,6 +226,16 @@ function Node:_attachLoop(): boolean
 				role = self.role,
 				catalogHash = Registry.hash(self.registry:catalog()),
 			})
+			for _, e in ipairs(pending) do
+				if e.type ~= "node.ready" then
+					if e.type == "log" then
+						e.node = self.nodeId
+					end
+					local t = e.t
+					self:emit(e)
+					e.t = t
+				end
+			end
 			if self.role == "server" and self.sessionId then
 				self:_scheduleSessionReady()
 			end
@@ -277,10 +297,23 @@ function Node:start()
 	if self.logCapture then
 		self.logCapture:start()
 	end
-	task.spawn(function()
+	-- loops restart after an unexpected error instead of silently dying
+	local function supervise(name: string, fn: () -> ())
+		task.spawn(function()
+			while self.running and gen == self._generation do
+				local ok, err = pcall(fn)
+				if ok then
+					return
+				end
+				Env.warn("[Stagehand] " .. name .. " loop error: " .. tostring(err))
+				task.wait(1)
+			end
+		end)
+	end
+	supervise("poll", function()
 		self:_pollLoop(gen)
 	end)
-	task.spawn(function()
+	supervise("flush", function()
 		self:_flushLoop(gen)
 	end)
 end
@@ -409,11 +442,13 @@ function Node:_scheduleSessionReady()
 	local players = Env.service("Players")
 	local lastChange = Env.clock()
 	if players then
-		players.PlayerAdded:Connect(function()
-			lastChange = Env.clock()
-		end)
-		players.PlayerRemoving:Connect(function()
-			lastChange = Env.clock()
+		pcall(function()
+			players.PlayerAdded:Connect(function()
+				lastChange = Env.clock()
+			end)
+			players.PlayerRemoving:Connect(function()
+				lastChange = Env.clock()
+			end)
 		end)
 	end
 	self._sessionWatcher = task.spawn(function()
