@@ -1,0 +1,608 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/unix-system/Stagehand/schema/playtest.schema.json",
+  "title": "Stagehand playtest",
+  "description": "Playtest spec v1. See docs/spec.md. Action/condition names and params are cross-checked against schema/catalog.json by the daemon.",
+  "type": "object",
+  "required": [
+    "name",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "session": {
+      "$ref": "#/$defs/session"
+    },
+    "timeout": {
+      "$ref": "#/$defs/duration"
+    },
+    "failOnError": {
+      "type": "boolean",
+      "default": true
+    },
+    "actors": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/actorName"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "player"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "player": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        }
+      }
+    },
+    "vars": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/ident"
+      }
+    },
+    "setup": {
+      "$ref": "#/$defs/stepList"
+    },
+    "steps": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepList"
+        },
+        {
+          "minItems": 1
+        }
+      ]
+    },
+    "teardown": {
+      "$ref": "#/$defs/stepList"
+    }
+  },
+  "$defs": {
+    "ident": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "actorName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "varRef": {
+      "type": "string",
+      "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "context": {
+      "enum": [
+        "edit",
+        "server",
+        "client"
+      ]
+    },
+    "duration": {
+      "description": "\"250ms\" | \"10s\" | \"1.5m\" | number of seconds",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+)?(ms|s|m)$"
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        }
+      ]
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "edit",
+            "run",
+            "play",
+            "multiplayer"
+          ]
+        },
+        "players": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "reuse": {
+          "type": "boolean",
+          "default": true
+        },
+        "reset": {
+          "enum": [
+            "respawn",
+            "hook",
+            "none"
+          ],
+          "default": "respawn"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "edit",
+                  "run"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "players": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "const": "play"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "players": {
+                "const": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "const": "multiplayer"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "players": {
+                "minimum": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stepList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "step": {
+      "type": "object",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/doStep"
+        },
+        {
+          "$ref": "#/$defs/waitStep"
+        },
+        {
+          "$ref": "#/$defs/expectStep"
+        },
+        {
+          "$ref": "#/$defs/luaStep"
+        },
+        {
+          "$ref": "#/$defs/parallelStep"
+        },
+        {
+          "$ref": "#/$defs/eachStep"
+        }
+      ]
+    },
+    "doStep": {
+      "type": "object",
+      "required": [
+        "do"
+      ],
+      "allOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "wait"
+                ]
+              },
+              {
+                "required": [
+                  "expect"
+                ]
+              },
+              {
+                "required": [
+                  "lua"
+                ]
+              },
+              {
+                "required": [
+                  "parallel"
+                ]
+              },
+              {
+                "required": [
+                  "each"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "do": {
+          "allOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            {
+              "not": {
+                "const": "lua"
+              }
+            }
+          ]
+        },
+        "as": {
+          "$ref": "#/$defs/actorName"
+        },
+        "on": {
+          "$ref": "#/$defs/context"
+        },
+        "timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "save": {
+          "$ref": "#/$defs/ident"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        },
+        "with": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "waitStep": {
+      "type": "object",
+      "required": [
+        "wait"
+      ],
+      "allOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "do"
+                ]
+              },
+              {
+                "required": [
+                  "expect"
+                ]
+              },
+              {
+                "required": [
+                  "lua"
+                ]
+              },
+              {
+                "required": [
+                  "parallel"
+                ]
+              },
+              {
+                "required": [
+                  "each"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "wait": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "as": {
+          "$ref": "#/$defs/actorName"
+        },
+        "on": {
+          "$ref": "#/$defs/context"
+        },
+        "timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        },
+        "with": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "expectStep": {
+      "type": "object",
+      "required": [
+        "expect"
+      ],
+      "allOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "do"
+                ]
+              },
+              {
+                "required": [
+                  "wait"
+                ]
+              },
+              {
+                "required": [
+                  "lua"
+                ]
+              },
+              {
+                "required": [
+                  "parallel"
+                ]
+              },
+              {
+                "required": [
+                  "each"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "expect": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "as": {
+          "$ref": "#/$defs/actorName"
+        },
+        "on": {
+          "$ref": "#/$defs/context"
+        },
+        "timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "within": {
+          "$ref": "#/$defs/duration"
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        },
+        "with": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "luaStep": {
+      "type": "object",
+      "required": [
+        "lua"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lua": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "object",
+              "required": [
+                "code"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "returns": {
+                  "enum": [
+                    "any",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "as": {
+          "$ref": "#/$defs/actorName"
+        },
+        "on": {
+          "$ref": "#/$defs/context"
+        },
+        "timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "save": {
+          "$ref": "#/$defs/ident"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        }
+      }
+    },
+    "parallelStep": {
+      "type": "object",
+      "required": [
+        "parallel"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "parallel": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/step"
+              },
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/stepList"
+                  },
+                  {
+                    "minItems": 1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        }
+      }
+    },
+    "eachStep": {
+      "type": "object",
+      "required": [
+        "each"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "each": {
+          "type": "object",
+          "required": [
+            "actors",
+            "steps"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "actors": {
+              "oneOf": [
+                {
+                  "const": "all"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/actorName"
+                  }
+                }
+              ]
+            },
+            "steps": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/stepList"
+                },
+                {
+                  "minItems": 1
+                }
+              ]
+            }
+          }
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        }
+      }
+    }
+  }
+}

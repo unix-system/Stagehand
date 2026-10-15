@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+*.log
+.stagehand/runs/
+plugin/build/*.rbxm
+.DS_Store
