@@ -1,5 +1,9 @@
-# Example game manifest. `wally install` populates ./Packages, which Rojo maps to
-# ReplicatedStorage.Packages (see default.project.json).
+# Example game manifest. The example has no registry dependencies.
+#
+# The in-repo hooks package is NOT a Wally dependency (Wally has no path dependencies). Rojo maps
+# ../../hooks/src straight to ReplicatedStorage.Packages.StagehandHooks (see default.project.json).
+# In your own game, either `wally add stagehand/hooks` once it is published, or copy hooks/src into
+# your Packages folder as StagehandHooks.
 [package]
 name = "stagehand/example-place"
 version = "0.1.0"
@@ -8,6 +12,3 @@ realm = "shared"
 private = true
 
 [dependencies]
-# Local path dependency on the in-repo hooks package. If your Wally version does not
-# support path dependencies, copy ../../hooks into Packages/StagehandHooks instead.
-StagehandHooks = { path = "../../hooks" }

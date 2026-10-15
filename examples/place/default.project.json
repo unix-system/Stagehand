@@ -85,7 +85,10 @@
         }
       },
       "Packages": {
-        "$path": { "optional": "Packages" }
+        "$className": "Folder",
+        "StagehandHooks": {
+          "$path": "../../hooks/src"
+        }
       }
     },
     "ServerScriptService": {

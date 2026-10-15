@@ -12,7 +12,7 @@ local SpawnService = require(ServerScriptService:WaitForChild("SpawnService"))
 local packages = ReplicatedStorage:FindFirstChild("Packages")
 local module = packages and packages:FindFirstChild("StagehandHooks")
 if not module or not module:IsA("ModuleScript") then
-	return -- stagehand-hooks not installed (`wally install`); nothing to register
+	return -- StagehandHooks not mapped into ReplicatedStorage.Packages; nothing to register
 end
 
 local ok, err = pcall(function()

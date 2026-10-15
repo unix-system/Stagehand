@@ -297,10 +297,11 @@ export class Run {
         if (
           (ev.error as ErrorObject | undefined)?.code === "CANCELLED" &&
           typeof ev.segmentId === "string" &&
-          this.daemonCancelled.has(ev.segmentId) &&
-          rec.status !== "failed"
+          this.daemonCancelled.has(ev.segmentId)
         ) {
-          // A daemon-initiated cancel: the node reports it as step.failed{CANCELLED}; record it as cancelled.
+          // A daemon-initiated cancel: the node reports it as step.failed{CANCELLED}. Record it as cancelled,
+          // unless the daemon already failed the step itself (run timeout), whose reason/error must stay.
+          if (rec.status === "failed") return;
           if (!TERMINAL.has(rec.status)) rec.status = "cancelled";
           rec.skipReason = "cancelled";
           this.stepEvent(rec, "step.cancelled", { durationMs: rec.durationMs, reason: "cancelled" });

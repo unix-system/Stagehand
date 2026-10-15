@@ -1,10 +1,14 @@
 --!nonstrict
 --[[
-	input.* actions (client only) via UserInputService:CreateVirtualInput().
+	input.* actions (client only) via VirtualInput.
 
-	VirtualInput is new (2026) and its exact argument orders could not be verified offline, so every
-	call goes through `send`, which tries the documented signature first and then known alternates.
-	Adjust SIGNATURES below if Studio rejects them.
+	The VirtualInput object is obtained once per node with UserInputService:CreateVirtualInput()
+	and cached (each DataModel loads its own copy of this module). Calls use the documented signatures:
+	  SendKey(isPressed: boolean, keyCode: Enum.KeyCode, isRepeatedKey: boolean = false)
+	  SendMouseButton(position: Vector2, button: Enum.UserInputType, isDown: boolean, repeatCount: number = 0)
+	  SendMouseDelta(positionDelta: Vector2)
+	  SendMousePosition(position: Vector2)
+	  SendTextInput(text: string)
 ]]
 
 local Meta = if script then require(script.Parent.Parent.Meta) else require("../Meta")
@@ -36,23 +40,19 @@ function Input.virtual()
 	return vi
 end
 
-local function send(method: string, variants: { { any } })
+local function call(method: string, ...)
 	local vi = Input.virtual()
-	local lastErr
-	for _, args in ipairs(variants) do
-		local ok, err = pcall(function()
-			vi[method](vi, table.unpack(args))
-		end)
-		if ok then
-			return
-		end
-		lastErr = err
+	local args = table.pack(...)
+	local ok, err = pcall(function()
+		vi[method](vi, table.unpack(args, 1, args.n))
+	end)
+	if not ok then
+		Errors.throw("ACTION_ERROR", "VirtualInput:" .. method .. " failed: " .. tostring(err))
 	end
-	return Errors.throw("ACTION_ERROR", "VirtualInput:" .. method .. " failed: " .. tostring(lastErr))
 end
 
 function Input.key(down: boolean, keyCode)
-	send("SendKey", { { down, keyCode }, { keyCode, down } })
+	call("SendKey", down, keyCode, false)
 end
 
 local BUTTONS = { Left = "MouseButton1", Right = "MouseButton2", Middle = "MouseButton3" }
@@ -60,24 +60,19 @@ local BUTTONS = { Left = "MouseButton1", Right = "MouseButton2", Middle = "Mouse
 function Input.mouseButton(position, button: string, down: boolean)
 	local E = Env.Enum()
 	local uit = E.UserInputType[BUTTONS[button] or "MouseButton1"]
-	local index = if button == "Right" then 1 elseif button == "Middle" then 2 else 0
-	send("SendMouseButton", {
-		{ position, uit, down },
-		{ uit, down, position },
-		{ position, index, down },
-	})
+	call("SendMouseButton", position, uit, down, 0)
 end
 
 function Input.mousePosition(position)
-	send("SendMousePosition", { { position } })
+	call("SendMousePosition", position)
 end
 
 function Input.mouseDelta(delta)
-	send("SendMouseDelta", { { delta } })
+	call("SendMouseDelta", delta)
 end
 
 function Input.text(text: string)
-	send("SendTextInput", { { text } })
+	call("SendTextInput", text)
 end
 
 function Input.click(ctx, position, button: string)

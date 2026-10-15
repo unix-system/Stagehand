@@ -9,8 +9,8 @@ server and client DataModels execute playtest steps. Contracts: [`docs/protocol.
 ## Build
 
 ```sh
-rokit install            # or install rojo/lune/selene/stylua manually
-rojo build -o Stagehand.rbxm
+rokit install                          # or install rojo/lune/selene/stylua manually
+rojo build plugin -o Stagehand.rbxm    # from the repo root
 ```
 
 The project (`default.project.json`) builds one `Script` named `Stagehand` whose children are the
@@ -19,7 +19,7 @@ modules in `src/`.
 ## Install
 
 Copy `Stagehand.rbxm` into the Studio plugins folder (Studio: *Plugins → Plugins Folder*), or
-`rojo build -o "$PLUGINS/Stagehand.rbxm"` directly. Restart Studio or reload plugins. A
+`rojo build plugin --plugin Stagehand.rbxm` to write it there directly. Restart Studio or reload plugins. A
 **Stagehand** toolbar button toggles the dock.
 
 ## First run: HTTP permission
@@ -89,7 +89,8 @@ selene plugin/src && stylua --check plugin/src tools hooks/src
 - **Client steps never run**: check the client node attached (`stagehand_status`). If plugins do not
   load in simulated clients, enable `USE_REMOTE_RELAY` in `src/Config.luau` and inject the node as a
   LocalScript (fallback path, skeleton only).
-- **`input.*` fails with "VirtualInput:Send… failed"**: `VirtualInput` argument orders are tried from
-  `src/Actions/Input.luau`; adjust them there for your Studio version.
+- **`input.*` fails with "VirtualInput:Send… failed"**: the client could not create or drive
+  `UserInputService:CreateVirtualInput()` (one instance per node, documented signatures, see
+  `src/Actions/Input.luau`); check that the step runs on a client node and the Studio version supports it.
 - **Session does not end**: `end_session` calls `StudioTestService:EndTest` from the server node and
   falls back to `RunService:Stop()` from the edit node.

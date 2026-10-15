@@ -161,6 +161,8 @@ describe("runner: control flow", () => {
     expect(segs.map((s) => `${s.role}${s.playerIndex ?? ""}:${s.params.steps.length}`).sort()).toEqual(
       ["server:8", "server:2", "client2:1", "server:2", "client2:1"].sort(),
     );
+    // Every run_segment carries the full actor map, so @red.character resolves on any node.
+    for (const seg of segs) expect(seg.params.actors).toEqual({ p1: 1, p2: 2, blue: 1, red: 2 });
   });
 
   it("a failing parallel branch cancels the other branch", async () => {
@@ -184,6 +186,8 @@ describe("runner: control flow", () => {
       "steps.4": "skipped",
     });
     expect(h.studio.client(2)!.received.some((c) => c.type === "cancel")).toBe(true);
+    // The node reported step.failed{CANCELLED} for the daemon-initiated cancel: recorded as cancelled, not failed.
+    expect(r.failure?.step).toBe("steps.3.parallel.0.0");
   });
 
   it("night-mode: lua save, expect lua, daemon-side log.noErrors", async () => {
@@ -275,6 +279,23 @@ describe("runner: control flow", () => {
     const r = await h.daemon.runs.start({ input: BLUE_TEAM }).done;
     expect(r.status).toBe("error");
     expect(r.errors.map((e) => e.message).join()).toMatch(/unknown game hook "game.requestSpawn"/);
+  });
+
+  it("session.ended from the edit node fails the in-flight step with SESSION_ERROR and clears the session", async () => {
+    h = await startHarness({ impl: (step) => (step.name === "session.wait" ? { status: "passed", delayMs: 5000 } : { status: "passed" }) });
+    const run = h.daemon.runs.start({ input: { name: "ended-mid-run", session: { players: 0 }, steps: [{ do: "session.wait", duration: "5s" }] } });
+    run.on((ev) => {
+      if (ev.type === "step.started" && ev.stepId === "steps.0") {
+        const sid = h!.daemon.sessions.current()!.sessionId;
+        void h!.studio.edit.events([{ type: "session.ended", sessionId: sid, ok: true, reason: "ended in Studio" }]);
+      }
+    });
+    const r = await run.done;
+    expect(r.status).toBe("failed");
+    expect(r.steps[0]).toMatchObject({ id: "steps.0", status: "failed" });
+    expect(r.failure?.reason).toMatch(/session ended/);
+    expect(h.daemon.sessions.current()).toBeNull();
+    expect(h.daemon.sessions.list().at(-1)!.state).toBe("ended");
   });
 
   it("session errors finish the run with status error", async () => {

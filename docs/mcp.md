@@ -4,9 +4,8 @@
 (`127.0.0.1:38491`, override with `STAGEHAND_PORT`). One daemon serves one Studio instance. Tool names come
 from [architecture.md](architecture.md#mcp-surface-packagesmcpsrcserver).
 
-> **Argument details may be refined by `packages/mcp`.** Tool names are fixed; argument names, defaults and
-> response fields below are the intended shape. When in doubt, trust the tool's own input schema as listed
-> by your MCP client. Items marked *(tbc)* are the most likely to change.
+> The tool reference below is generated from `packages/mcp/src/server/tools.ts`. When in doubt, trust the
+> tool's own input schema as listed by your MCP client.
 
 ## Client configuration
 
@@ -49,8 +48,16 @@ or commit a project-scoped `.mcp.json`:
 ```
 
 Add `"--allow-eval"` to `args` only if you want agents to use `eval_lua`. Tests and run reports are stored
-relative to the daemon's working directory: `playtests/*.playtest.yaml` and `.stagehand/runs/` *(tbc:
-a `--root` flag may override)*.
+relative to the project root (`--root <dir>`, default the daemon's working directory):
+`playtests/*.playtest.yaml` and `.stagehand/runs/`.
+
+| Flag | Meaning |
+|---|---|
+| `--root <dir>` | project dir (tests in `<root>/playtests`, runs in `<root>/.stagehand/runs`; default cwd) |
+| `--port <n>` | broker port (default `$STAGEHAND_PORT` or 38491) |
+| `--allow-eval` | enable the `eval_lua` tool |
+| `--idle-timeout <dur>` | end idle Studio sessions after this long (default 120s; 0 = never) |
+| `--broker-only` | run only the HTTP broker (no MCP stdio), for debugging |
 
 ## Recommended agent workflow
 
@@ -71,338 +78,194 @@ The `write_playtest` prompt packages this workflow as a template.
 
 ## Tools
 
+Generated from the tool definitions in `packages/mcp/src/server/tools.ts` (the input schema your MCP
+client lists is authoritative). `?` = optional. Durations accept `"10s"`, `"500ms"`, `"2m"` or milliseconds.
+
+| Tool | Purpose |
+|---|---|
+| [`stagehand_status`](#stagehand_status) | Show daemon health: broker port, attached Studio nodes (edit/server/client with sessionId and playerIndex), the current test session, the active run and catalog state. |
+| [`list_actions`](#list_actions) | List the catalog of playtest actions (use with do:) and conditions (use with wait:/expect:), including live game.* hooks from the running game. |
+| [`inspect`](#inspect) | Inspect instances in the live DataModel to discover paths for selectors: remotes, teams, tools, GUI elements, tagged parts, attributes. |
+| [`validate_test`](#validate_test) | Validate a playtest (YAML/JSON text, object, or a saved test by name) against the schema and the action catalog without running it. |
+| [`run_steps`](#run_steps) | Run unsaved steps in Studio right away (launches or reuses a test session) and return a pass/fail report with expected/actual for failures. |
+| [`run_test`](#run_test) | Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual, logs around the failure, per-step table). |
+| [`run_suite`](#run_suite) | Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests). |
+| [`get_run`](#get_run) | Get the result of a run by runId (or "latest"): status, failure (step, reason, expected, actual, node, logs around), per-step statuses and final vars. |
+| [`tail_run`](#tail_run) | Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished). |
+| [`cancel_run`](#cancel_run) | Cancel a queued or running run (default: the active run). |
+| [`list_tests`](#list_tests) | List saved playtests in playtests/ with description and tags. |
+| [`get_test`](#get_test) | Return the YAML source of a saved playtest. |
+| [`save_test`](#save_test) | Validate and save a playtest to playtests/<name>.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). |
+| [`delete_test`](#delete_test) | Delete a saved playtest (playtests/<name>.playtest.yaml). |
+| [`start_session`](#start_session) | Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). |
+| [`stop_session`](#stop_session) | End the current Studio test session (EndTest on the server, RunService:Stop via the edit node as fallback). |
+| [`eval_lua`](#eval_lua) | Run arbitrary Luau on a node and return its value and captured logs. |
+
 ### `stagehand_status`
 
-Daemon, broker and node state (mirrors the broker's `GET /v1/health`, see protocol.md).
+Show daemon health: broker port, attached Studio nodes (edit/server/client with sessionId and playerIndex), the current test session, the active run and catalog state. Call this first to check that Roblox Studio with the Stagehand plugin is connected.
 
-```json
-{ "name": "stagehand_status", "arguments": {} }
-```
-```json
-{
-  "ok": true,
-  "version": "0.1.0",
-  "port": 38491,
-  "allowEval": false,
-  "nodes": [
-    { "nodeId": "n_1", "role": "edit", "sessionId": null, "playerIndex": null, "orphan": false, "lastSeenMs": 120 }
-  ],
-  "sessions": [],
-  "activeRun": null
-}
-```
+No arguments.
 
 ### `list_actions`
 
-The merged catalog: static entries from `schema/catalog.json` plus live `game.*` hooks from the attached
-place. Optional filters.
+List the catalog of playtest actions (use with do:) and conditions (use with wait:/expect:), including live game.* hooks from the running game. Each line: name [kind] (contexts, * = default) needs-as? {params; ? = optional}: summary. Pass `name` for one entry's full JSON schema. Includes a step-syntax cheat sheet.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `namespace` | string? | e.g. `character`, `game` |
-| `kind` | `action \| condition`? | |
-
-```json
-{ "name": "list_actions", "arguments": { "namespace": "game" } }
-```
-```json
-{
-  "entries": [
-    { "name": "game.requestSpawn", "kind": "action", "contexts": ["server"], "default": "server",
-      "summary": "Spawn the player at their team's SpawnLocation (same path as the SpawnButton)",
-      "actor": "optional", "params": { "type": "object", "additionalProperties": true }, "source": "hook" },
-    { "name": "game.hasSpawned", "kind": "condition", "contexts": ["server"], "default": "server",
-      "summary": "The player has a living character", "actor": "optional",
-      "params": { "type": "object", "additionalProperties": true }, "source": "hook" }
-  ]
-}
-```
+| `kind`? | `action` \| `condition` | Filter by kind |
+| `namespace`? | string | Filter by namespace prefix, e.g. "character" or "game" |
+| `context`? | `edit` \| `server` \| `client` | Only entries runnable in this context |
+| `name`? | string | Return the full JSON entry for this exact name |
 
 ### `inspect`
 
-Browse the DataModel to discover remotes, teams, tools and GUI paths. Give one of `path`, `tag`, `class`.
+Inspect instances in the live DataModel to discover paths for selectors: remotes, teams, tools, GUI elements, tagged parts, attributes. Give exactly one of path (e.g. "ReplicatedStorage.Remotes", "@p1.gui"), tag, or className. Runs on the server of the current session if one is running, else on the edit DataModel; use on: client with as: p1 to see a player's GUI.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `path` | selector? | any selector form, e.g. `ReplicatedStorage.Remotes`, `@p1.gui` |
-| `tag` | string? | CollectionService tag |
-| `class` | string? | `IsA` match, e.g. `RemoteEvent`, `Tool`, `GuiButton` |
-| `depth` | integer? | children depth, default 1 *(tbc)* |
-| `on` / `as` | context / actor? | which node to inspect; defaults to the edit node, or the server in a session *(tbc)* |
-
-```json
-{ "name": "inspect", "arguments": { "class": "RemoteEvent" } }
-```
-```json
-{
-  "matches": [
-    { "path": "ReplicatedStorage.Remotes.RequestSpawn", "class": "RemoteEvent", "tags": [], "attributes": {} }
-  ]
-}
-```
+| `path`? | string | Instance path or selector to start from (default: game) |
+| `tag`? | string | CollectionService tag to list |
+| `className`? | string | List instances of this class (IsA) |
+| `depth`? | integer | Child depth to include (default 1) |
+| `limit`? | integer | Max nodes (default 200) |
+| `on`? | `edit` \| `server` \| `client` | Which DataModel to inspect |
+| `as`? | string | Client to use with on: client (p1..p8; default p1) |
 
 ### `validate_test`
 
-Validate a spec (object or YAML string) or a saved test by name. Does not need Studio for static catalog
-entries; unknown `game.*` names are only errors once a node has reported its catalog.
+Validate a playtest (YAML/JSON text, object, or a saved test by name) against the schema and the action catalog without running it. Returns errors with paths and line numbers, warnings, and the compiled plan (which node each step runs on, merged segments). Use before run_steps/save_test.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `spec` | object \| string? | the playtest, as JSON or YAML text |
-| `name` | string? | a saved test |
-
-```json
-{ "name": "validate_test", "arguments": { "spec": "name: t\nsession: { players: 2 }\nsteps:\n  - { do: player.setTeam, team: Blue }\n" } }
-```
-```json
-{
-  "valid": false,
-  "errors": [ { "path": "steps.0", "code": "MISSING_ACTOR", "message": "player.setTeam needs `as` when players >= 2" } ],
-  "warnings": [],
-  "plan": null
-}
-```
-
-On success `plan` lists the compiled segments (which node runs which steps) — useful to check routing.
+| `spec`? | string \| object | Playtest as YAML/JSON text or as an object |
+| `name`? | string | Name of a saved test in playtests/ (instead of spec) |
 
 ### `run_steps`
 
-Run unsaved steps (ad hoc). Reuses a compatible live session or launches one.
+Run unsaved steps in Studio right away (launches or reuses a test session) and return a pass/fail report with expected/actual for failures. steps is a YAML/JSON list of steps (or a whole playtest document), e.g. "- { do: player.setTeam, as: p1, team: Blue }\n- { expect: player.onTeam, as: p1, team: Blue }". Set session.players (0 = Run mode, 1 = Play, 2-8 = multiplayer). Streams step progress when the client sends a progressToken.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `steps` | step[] | same grammar as a spec's `steps` |
-| `session` | object? | `{ mode, players, reuse, reset }`, default `{ players: 0 }` (Run) |
-| `vars` / `actors` / `setup` / `teardown` | optional | as in a spec *(tbc)* |
-| `timeout` | duration? | whole-run budget, default `60s` |
-
-```json
-{
-  "name": "run_steps",
-  "arguments": {
-    "session": { "players": 1 },
-    "steps": [
-      { "do": "player.setTeam", "as": "p1", "team": "Blue" },
-      { "do": "game.requestSpawn", "as": "p1" },
-      { "wait": "character.loaded", "as": "p1" }
-    ]
-  }
-}
-```
-```json
-{
-  "runId": "r_20261015T101502_adhoc",
-  "status": "passed",
-  "durationMs": 4120,
-  "session": { "id": "s_3", "mode": "play", "players": 1, "reused": false, "launchMs": 3310 },
-  "steps": [
-    { "id": "steps.0", "status": "passed", "durationMs": 8 },
-    { "id": "steps.1", "status": "passed", "durationMs": 41 },
-    { "id": "steps.2", "status": "passed", "durationMs": 690 }
-  ],
-  "reportDir": ".stagehand/runs/20261015T101502-adhoc"
-}
-```
+| `steps` | string \| object[] | Steps as YAML/JSON text or array |
+| `session`? | object | Session: mode edit\|run (0 players) \| play (1) \| multiplayer (2..8); omitted mode is inferred from players |
+| `vars`? | object | Vars referenced as $name |
+| `actors`? | object | Actor aliases, e.g. {blue: {player: 1}} |
+| `setup`? | object[] |  |
+| `teardown`? | object[] |  |
+| `timeout`? | string \| number | Whole-run budget (default 60s) |
+| `failOnError`? | boolean | Fail the active step on any error-level Output (default true) |
+| `name`? | string | Run name for the report (default adhoc) |
+| `wait`? | boolean | Wait for completion (default true); false returns the runId immediately |
 
 ### `run_test`
 
-Run a saved test.
+Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual, logs around the failure, per-step table). Reports are stored under .stagehand/runs/. With wait: false returns a runId to follow with tail_run/get_run.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `name` | string | |
-| `wait` | boolean? | default `true`; `false` returns `{ runId }` immediately — then poll `tail_run` |
-| `timeout` | duration? | overrides the spec's `timeout` |
-
-```json
-{ "name": "run_test", "arguments": { "name": "failing-example" } }
-```
-```json
-{
-  "runId": "r_20261015T101910_failing-example",
-  "status": "failed",
-  "failedStep": {
-    "id": "steps.3", "label": "never true: nothing adds Champion",
-    "reason": "condition instance.hasTag not true within 1s",
-    "expected": { "target": "Workspace.Player1", "tag": "Champion", "value": true },
-    "actual": { "value": false, "tags": [] },
-    "error": { "code": "ASSERTION_FAILED" },
-    "logs": []
-  },
-  "steps": [
-    { "id": "steps.0", "status": "passed" }, { "id": "steps.1", "status": "passed" },
-    { "id": "steps.2", "status": "passed" }, { "id": "steps.3", "status": "failed" },
-    { "id": "steps.4", "status": "skipped" }
-  ],
-  "reportDir": ".stagehand/runs/20261015T101910-failing-example"
-}
-```
+| `name` | string | Saved test name |
+| `wait`? | boolean | Wait for completion (default true) |
+| `timeout`? | string \| number | Override the test's whole-run timeout |
+| `vars`? | object | Override/add vars |
 
 ### `run_suite`
 
-Run several saved tests sequentially, sharing sessions where `mode`/`players` match.
+Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests). Returns a pass/fail table with each runId and the first failure reason; use get_run for details.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `tag` | string? | e.g. `smoke` |
-| `names` | string[]? | explicit list |
-| `exclude` | string[]? | tags to skip, e.g. `["demo-failure"]` *(tbc)* |
-
-```json
-{ "name": "run_suite", "arguments": { "tag": "smoke" } }
-```
-```json
-{
-  "suiteId": "u_20261015T102200",
-  "status": "passed",
-  "results": [
-    { "name": "run-mode-smoke", "runId": "r_…", "status": "passed", "durationMs": 2410 },
-    { "name": "blue-team-gun-hostile", "runId": "r_…", "status": "passed", "durationMs": 5120 },
-    { "name": "gui-spawn-button", "runId": "r_…", "status": "passed", "durationMs": 1460 }
-  ]
-}
-```
+| `tag`? | string | Run tests having this tag |
+| `names`? | string[] | Run these tests (in order) |
+| `stopOnFailure`? | boolean | Stop after the first failing test (default false) |
 
 ### `get_run`
 
-Full result of a run (same content as `.stagehand/runs/<dir>/result.json`).
+Get the result of a run by runId (or "latest"): status, failure (step, reason, expected, actual, node, logs around), per-step statuses and final vars. Works for in-progress runs (partial) and past runs stored in .stagehand/runs/.
 
-```json
-{ "name": "get_run", "arguments": { "id": "r_20261015T101910_failing-example" } }
-```
-
-Response: the `run_test` shape plus `events` count, per-step `startedAt`, segment timings and the Markdown
-summary path.
+| Arg | Type | Notes |
+|---|---|---|
+| `runId` | string | Run id from run_* tools, or "latest" |
+| `format`? | `markdown` \| `json` | markdown (default) or full json |
 
 ### `tail_run`
 
-Events since a sequence number — for streaming progress of a run started with `wait: false`.
+Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished). Poll with afterSeq = the returned lastSeq to follow a run started with wait: false.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `id` | string | runId |
-| `afterSeq` | integer? | default 0 |
-
-```json
-{ "name": "tail_run", "arguments": { "id": "r_…", "afterSeq": 12 } }
-```
-```json
-{
-  "events": [
-    { "seq": 13, "type": "step.started", "stepId": "steps.5" },
-    { "seq": 14, "type": "step.passed", "stepId": "steps.5", "durationMs": 312 },
-    { "seq": 15, "type": "run.finished", "status": "passed" }
-  ],
-  "lastSeq": 15,
-  "done": true
-}
-```
+| `runId` | string | Run id or "latest" |
+| `afterSeq`? | integer | Only events with seq > afterSeq (default 0) |
+| `limit`? | integer | Max events (default 200) |
 
 ### `cancel_run`
 
-```json
-{ "name": "cancel_run", "arguments": { "id": "r_…" } }
-```
-```json
-{ "runId": "r_…", "status": "cancelled", "teardown": "ran" }
-```
+Cancel a queued or running run (default: the active run). In-flight steps are cancelled on the nodes, then teardown runs.
+
+| Arg | Type | Notes |
+|---|---|---|
+| `runId`? | string | Run id (default: active run) |
 
 ### `list_tests`
 
+List saved playtests in playtests/ with description and tags.
+
 | Arg | Type | Notes |
 |---|---|---|
-| `tag` | string? | filter |
-
-```json
-{ "name": "list_tests", "arguments": { "tag": "multiplayer" } }
-```
-```json
-{ "tests": [ { "name": "two-players-spawn", "tags": ["multiplayer", "combat"], "players": 2, "mode": "multiplayer",
-  "path": "playtests/two-players-spawn.playtest.yaml" } ] }
-```
+| `tag`? | string | Only tests with this tag |
 
 ### `get_test`
 
-```json
-{ "name": "get_test", "arguments": { "name": "blue-team-gun-hostile" } }
-```
-```json
-{ "name": "blue-team-gun-hostile", "path": "playtests/blue-team-gun-hostile.playtest.yaml",
-  "yaml": "name: blue-team-gun-hostile\n…", "spec": { "name": "blue-team-gun-hostile", "steps": [ … ] } }
-```
+Return the YAML source of a saved playtest.
+
+| Arg | Type | Notes |
+|---|---|---|
+| `name` | string |  |
 
 ### `save_test`
 
-Validates, then writes `playtests/<name>.playtest.yaml`. Refuses invalid specs.
+Validate and save a playtest to playtests/<name>.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). The spec's name must equal `name`. Refuses invalid specs unless force: true. Overwrites an existing test.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `name` | string | must equal `spec.name` |
-| `spec` | object \| string | JSON object or YAML text (YAML is preserved verbatim, comments included) |
-| `overwrite` | boolean? | default `true` *(tbc)* |
-
-```json
-{ "name": "save_test", "arguments": { "name": "spawn-blue", "spec": "name: spawn-blue\nsession: { players: 1 }\nsteps:\n  - { do: game.requestSpawn, as: p1 }\n" } }
-```
-```json
-{ "saved": true, "path": "playtests/spawn-blue.playtest.yaml", "warnings": [] }
-```
+| `name` | string | Test name (lowercase kebab-case) |
+| `spec` | string \| object | Playtest as YAML/JSON text or as an object |
+| `force`? | boolean | Save even if validation fails |
 
 ### `delete_test`
 
-```json
-{ "name": "delete_test", "arguments": { "name": "spawn-blue" } }
-```
-```json
-{ "deleted": true }
-```
+Delete a saved playtest (playtests/<name>.playtest.yaml). Past run reports are kept.
+
+| Arg | Type | Notes |
+|---|---|---|
+| `name` | string |  |
 
 ### `start_session`
 
-Launch (or reuse) a Studio test session explicitly, e.g. to `inspect` a running game.
+Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `mode` | `run \| play \| multiplayer`? | default from `players` |
-| `players` | integer? | 0..8 |
-
-```json
-{ "name": "start_session", "arguments": { "players": 2 } }
-```
-```json
-{ "session": { "id": "s_4", "mode": "multiplayer", "players": 2,
-  "nodes": [ { "nodeId": "n_5", "role": "server" }, { "nodeId": "n_6", "role": "client", "playerIndex": 1 },
-             { "nodeId": "n_7", "role": "client", "playerIndex": 2 } ], "launchMs": 7420 } }
-```
+| `mode`? | `run` \| `play` \| `multiplayer` |  |
+| `players`? | integer |  |
+| `reset`? | `respawn` \| `hook` \| `none` | Reset applied if an existing session is reused (default none) |
 
 ### `stop_session`
 
-Ends the active session (`EndTest` from the server node). Idle sessions also end on their own after 120 s.
+End the current Studio test session (EndTest on the server, RunService:Stop via the edit node as fallback). Refused while a run is active; cancel_run first.
 
-```json
-{ "name": "stop_session", "arguments": {} }
-```
-```json
-{ "stopped": true, "sessionId": "s_4" }
-```
+No arguments.
 
-### `eval_lua` (guarded)
+### `eval_lua`
 
-Runs arbitrary Luau on a node. Disabled unless the daemon was started with `--allow-eval`; otherwise
-returns `EVAL_DISABLED`.
+Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel.
 
 | Arg | Type | Notes |
 |---|---|---|
-| `code` | string | |
-| `on` | `edit \| server \| client`? | default `server` in a session, else `edit` |
-| `as` | actor? | for `client`, which window |
-
-```json
-{ "name": "eval_lua", "arguments": { "code": "return #game:GetService('Teams'):GetTeams()", "on": "server" } }
-```
-```json
-{ "value": 2, "logs": [] }
-```
+| `code` | string | Luau chunk, e.g. "return #game.Players:GetPlayers()" |
+| `on`? | `edit` \| `server` \| `client` |  |
+| `as`? | string | Actor p1..p8 (client to run on, or the player bound on the server) |
+| `vars`? | object |  |
 
 ## Resources
 
@@ -414,7 +277,7 @@ returns `EVAL_DISABLED`.
 
 ## Prompt
 
-`write_playtest` (args: `goal`, optional `players`) — instructs the agent to `inspect`, draft YAML,
+`write_playtest` (args: `goal`, optional `name`) — instructs the agent to `inspect`, draft YAML,
 `validate_test`, `run_steps`, then `save_test`.
 
 ## Errors

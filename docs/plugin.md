@@ -16,10 +16,9 @@ the latest CI run) and drop it into your local plugins folder:
 
 Or in Studio: **Plugins → Plugins Folder**, then copy the file there. Restart Studio (or reopen the place).
 
-**From source** (needs [Rojo](https://rojo.space) 7.x and Wally):
+**From source** (needs [Rojo](https://rojo.space) 7.x; the plugin has no Wally dependencies):
 
 ```sh
-cd plugin && wally install && cd ..
 rojo build plugin --plugin Stagehand.rbxm      # builds straight into the Studio plugins folder
 # or: rojo build plugin -o Stagehand.rbxm      # then copy it manually
 ```
@@ -92,4 +91,4 @@ falls back to an injected client runtime behind the same protocol.
   multiplayer tests together with `run_suite { tag: "multiplayer" }`.
 
 **`UNKNOWN_ACTION game.*`** — the place does not register that hook, or the hooks package is not installed
-(`StagehandBindings` warns in Output). Run `list_actions { namespace: "game" }` while a session is live.
+(in `examples/place` it is mapped by Rojo from `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks`). Run `list_actions { namespace: "game" }` while a session is live.

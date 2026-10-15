@@ -180,6 +180,18 @@ export class FakeStudio {
       const durationMs = Date.now() - t0;
       if (cancelled) {
         results.push({ id: raw.id, status: "cancelled", durationMs });
+        // Like the plugin: a cancelled step is reported as step.failed with code CANCELLED.
+        await node.events([
+          {
+            type: "step.failed",
+            ...base,
+            durationMs,
+            reason: "cancelled",
+            expected: null,
+            actual: null,
+            error: { code: "CANCELLED", message: "cancelled" },
+          },
+        ]);
         continue;
       }
       if (out.status === "passed") {

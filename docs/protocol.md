@@ -20,7 +20,7 @@ attaches, long-polls for commands, posts results and streams events.
 |---|---|---|---|
 | `POST /v1/attach` | node → broker | `200` attach response | `400` |
 | `GET /v1/poll?node=<nodeId>` | node → broker | `200 {command}` or `204` after 25 s | `410` unknown node → re-attach |
-| `POST /v1/result` | node → broker | `200 {ok:true}` | `404` unknown commandId, `410` |
+| `POST /v1/result` | node → broker | `200 {ok:true}` | `404 BAD_REQUEST` unknown commandId (late result after a daemon timeout/cancel; the node ignores it), `410` |
 | `POST /v1/events` | node → broker | `200 {ack:<lastSeq>}` | `410` |
 | `GET /v1/health` | anyone | `200` health | — |
 
@@ -110,6 +110,11 @@ GET /v1/poll?node=n_7
 and `ping`, which must be processed while a `run_segment` is in flight (the node runs segments in a
 separate coroutine and keeps polling).
 
+**One command per type per node.** The broker enforces this on its side too: it delivers at most one
+in-flight command of each type to a node (a second `run_segment` stays queued until the first one's result
+arrives or times out); `cancel` and `ping` bypass the rule. Parallel branches therefore only run
+concurrently when they target different nodes; branches on the same node run one segment after another.
+
 ## Result
 
 ```json
@@ -140,7 +145,16 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 `launch_session` on the edit node: write the `Stagehand.Session` setting, then call (in a new thread)
 `ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAsync(args)` for `play`,
 `ExecuteMultiplayerTestAsync(players, args)` for `multiplayer`, with
-`args = { stagehand = { sessionId = …, port = … } }`.
+`args = { stagehand = { sessionId = …, port = …, mode = …, players = … } }`. The server node reads
+`players` from `GetTestArgs().stagehand` to know how many players to wait for before `session.ready`
+(Run mode: 0; without test args it emits after 1.5 s without joins). Run mode simulates inside the edit
+DataModel, so the edit plugin instance also hosts that session's server node. When `Execute*Async`
+returns (test stopped, `EndTest`, or an error) the edit node clears the setting and emits `session.ended`.
+
+There is no `clear_logs` command. Node-side log buffers (used by node-evaluated `log.*` steps with
+`scope: server|client` and by `eval` logs) are scoped per `runId`: the window starts at the first
+`run_segment` of a new run on that node and is not cleared by a reset (`respawn` / `hook`). The daemon's own
+log window (for `scope: all`) is per run as well.
 
 ### run_segment
 
@@ -149,6 +163,7 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
   "runId": "r_20261015T150102_blue-team-gun-hostile",
   "segmentId": "seg_2",
   "vars": { "spawn": [120, 5, -40] },
+  "actors": { "p1": 1, "blue": 1 },
   "steps": [
     {
       "id": "steps.3",
@@ -202,7 +217,24 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `actor` | `{name, playerIndex}` \| null | |
 | `label` | string \| null | display only |
 | `save` | string \| null | store the action's / lua's return value in `vars[save]` |
+| `if` | string? | **optional, normally absent.** The daemon evaluates `if: $var` itself before dispatch (see below) and does not send it. A node that receives it skips the step (`step.skipped`, reason `if`) when the var is falsy; absent = run |
 
+| Segment field | Type | Notes |
+|---|---|---|
+| `runId`, `segmentId` | string | reset segments use `reset_<sessionId>_<n>` / `reset_<n>` |
+| `vars` | object | the run's vars at dispatch time |
+| `actors` | object | **always sent**: the run's full actor map, name → playerIndex (`p1..pN` plus spec aliases). Nodes use it to resolve selectors naming an actor other than the step's own (`@red.character` in a step `as: blue`); unknown names fall back to `pN` parsing |
+| `steps` | WireStep[] | |
+
+### Daemon-evaluated steps
+
+Some steps never reach a node; the daemon runs them itself and emits the same `step.*` events to MCP:
+
+| Step | Daemon behaviour |
+|---|---|
+| `if: $var` (any step, `parallel`, `each`) | checked against the run's vars just before the step's segment would be dispatched; falsy (`null`, `false`, `0`, `""`, missing; same rule on nodes) → every step in scope is `skipped` with reason `if`; a step carrying `if` is dispatched as its own segment |
+| `wait`/`expect` `log.noErrors`, `log.matches` with `scope: all` (the default) | evaluated over the run's collected `log` events from every node of the session (after a 150 ms settle, polling until `timeoutMs`/`withinMs`) |
+| `log.*` with `scope: server` / `client` | sent to that node like any condition (node-side buffer, see above) |
 Node rules: execute steps in order; vars referenced as `$name` that were left unresolved are substituted from
 `params.vars` + values saved earlier in this segment; on a non-soft failure stop and mark remaining steps
 `skipped` (reason `aborted`).
@@ -224,6 +256,15 @@ Result:
 
 `status` ∈ `passed | failed | cancelled`; step `status` ∈ `passed | failed | skipped | cancelled`; a step with
 `save` has `"value"`. `vars` is the full var map after the segment (the daemon merges it).
+
+### Cancel
+
+On `cancel` the node flips the segment's cancel flag; the running step stops at its next yield, and the node
+reports it as **`step.failed` with `error.code: "CANCELLED"`** (result entry `status: "cancelled"`); remaining
+steps get result status `cancelled`. The daemon records such a step as **`cancelled`, not `failed`**, when it
+sent the `cancel` itself (run cancel, a sibling `parallel` branch failed, run timeout). Exceptions: a step
+the daemon already failed (run timeout → `TIMEOUT`, daemon-side step timeout) keeps its failure, and a
+`CANCELLED` the daemon did not initiate (e.g. re-attach dropped the command) counts as a failure.
 
 ## Events
 
@@ -247,8 +288,9 @@ node). Response `{ "ack": 103 }`; the node may drop acknowledged events.
 
 | type | Emitted by | Extra fields |
 |---|---|---|
-| `node.ready` | node, after attach + catalog built | `role`, `catalogHash` (sha1 hex of sorted entry names+params) |
+| `node.ready` | node, after attach + catalog built | `role`, `catalogHash` (see below) |
 | `session.ready` | server node, after required players joined and characters loaded (or players=0) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order |
+| `session.ended` | edit node, when `Execute*Async` returns | `sessionId`, `ok` (boolean), `reason` (string) |
 | `segment.started` | node | `runId`, `segmentId` |
 | `segment.finished` | node | `runId`, `segmentId`, `status` |
 | `step.started` | node | `runId`, `segmentId`, `stepId` |
@@ -256,10 +298,21 @@ node). Response `{ "ack": 103 }`; the node may drop acknowledged events.
 | `step.failed` | node | `…stepId`, `durationMs`, `reason` (string), `expected` (any), `actual` (any), `error` (ErrorObject) |
 | `step.skipped` | node or daemon | `…stepId`, `reason: "if" \| "aborted"` |
 | `log` | node (`LogService.MessageOut`) | `level: "info" \| "warn" \| "error"`, `message`, `node` (nodeId), `stepId \| null` |
-| `run.started` / `run.finished` | daemon only (never on the wire; forwarded to MCP) | `runId`, `status?` |
+| `run.started` / `run.finished`, `step.cancelled` | daemon only (never on the wire; forwarded to MCP) | `runId`, `status?` |
+
+`catalogHash`: lowercase sha1 hex of the node's catalog entries (static + live `game.*`) sorted by `name`,
+one line per entry `name .. compactJson(params)`, lines joined by `"\n"`. The daemon treats it as
+**opaque**: it stores it per node (shown in health) and only ever compares hashes for equality; it always
+fetches the full catalog with the `catalog` command after `node.ready`.
+
+`session.ended` handling: if `sessionId` is the daemon's current session (and the daemon is not already
+ending it), the daemon marks the session `ended`, clears its current session, and drops the session's
+server/client nodes, which rejects their in-flight commands (an in-flight `run_segment` fails its step with
+`SESSION_ERROR`). The next run launches a fresh session.
 
 `MessageOutput` → level: `MessageOutput`/`MessageInfo` → `info`, `MessageWarning` → `warn`, `MessageError` → `error`.
-With `failOnError: true` the daemon fails the active step on any `log` with `level:"error"` from any node in the session.
+With `failOnError: true` the daemon fails the active step on any `log` with `level:"error"` from any node in the session
+(error code `ACTION_ERROR`, `expected: {errors: 0}`); an error logged while no step is active fails the run.
 
 ## Health
 
@@ -288,18 +341,18 @@ Session `state` ∈ `launching | ready | resetting | ending | ended`. A node is 
 
 | code | Meaning |
 |---|---|
-| `BAD_REQUEST` | malformed body, wrong `protocolVersion` |
+| `BAD_REQUEST` | malformed body, wrong `protocolVersion` (HTTP 400); unknown route or unknown `commandId` on `/v1/result` (HTTP 404) |
 | `UNKNOWN_NODE` | nodeId not attached (HTTP 410) |
 | `UNKNOWN_COMMAND` | command `type` not supported by this node/role |
 | `UNKNOWN_ACTION` | step `name` not in the node's catalog |
 | `BAD_PARAMS` | params fail the catalog schema or coercion |
 | `RESOLVE_FAILED` | selector / actor did not resolve |
-| `TIMEOUT` | wait or action exceeded `timeoutMs` (node) or +2 s (daemon) |
+| `TIMEOUT` | wait or action exceeded `timeoutMs` (node) or +2 s (daemon); run-level `timeout` exceeded |
 | `CANCELLED` | cancelled by `cancel` or re-attach |
-| `ACTION_ERROR` | action threw |
+| `ACTION_ERROR` | action threw; also set by the daemon when `failOnError` fails a step on an error log |
 | `ASSERTION_FAILED` | `expect` condition false |
 | `LUA_ERROR` | `lua` / `eval` code threw or failed to compile |
-| `SESSION_ERROR` | launch / end / add_players failed |
+| `SESSION_ERROR` | launch / end / add_players failed; set by the daemon when a node drops (expired, re-attached away, `session.ended`) while a command is in flight, or a session never becomes ready |
 | `EVAL_DISABLED` | `eval` while the daemon runs without `--allow-eval` (returned by the daemon, not nodes) |
 | `INTERNAL` | anything else |
 

@@ -351,7 +351,7 @@ function Runner:runSegment(params: any): any
 		runId = runId,
 		cancelled = false,
 		cancelSignal = Signal.new(),
-		actors = params.actors, -- optional {name → playerIndex}; not in protocol v1
+		actors = params.actors, -- {name → playerIndex}; always sent by the daemon (protocol.md run_segment)
 	}
 	self.active[segId] = seg
 	if node.logCapture then
