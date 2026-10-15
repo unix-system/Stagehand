@@ -1,0 +1,10 @@
+name: failing-example
+description: Deliberately fails — expects a tag the game never adds, to show what a failure report looks like
+tags: [demo-failure]
+session: { players: 1 }
+steps:
+  - { do: player.setTeam,    as: p1, team: Blue }
+  - { do: game.requestSpawn, as: p1 }
+  - { wait: character.loaded, as: p1, timeout: 10s }
+  - { expect: instance.hasTag, target: "@p1.character", tag: Champion, within: 1s, label: "never true: nothing adds Champion" }
+  - { expect: log.noErrors, label: "skipped: the previous step aborts the run" }

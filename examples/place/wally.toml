@@ -1,0 +1,13 @@
+# Example game manifest. `wally install` populates ./Packages, which Rojo maps to
+# ReplicatedStorage.Packages (see default.project.json).
+[package]
+name = "stagehand/example-place"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+private = true
+
+[dependencies]
+# Local path dependency on the in-repo hooks package. If your Wally version does not
+# support path dependencies, copy ../../hooks into Packages/StagehandHooks instead.
+StagehandHooks = { path = "../../hooks" }

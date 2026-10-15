@@ -1,0 +1,28 @@
+name: two-players-spawn
+description: Two players on opposite teams spawn, equip the Gun at the same time, and both turn Hostile
+tags: [multiplayer, combat]
+session: { players: 2, reset: hook }   # → mode: multiplayer; reset via game.reset between runs
+actors:
+  blue: { player: 1 }
+  red:  { player: 2 }
+steps:
+  - { do: player.setTeam, as: blue, team: Blue }
+  - { do: player.setTeam, as: red,  team: Red }
+  - each:
+      actors: [p1, p2]
+      steps:
+        - { do: game.requestSpawn }
+        - { wait: character.loaded, timeout: 15s }
+        - { expect: game.hasSpawned }
+  - { expect: player.onTeam, as: blue, team: Blue }
+  - { expect: player.onTeam, as: red,  team: Red }
+  - parallel:
+      - { do: character.equipTool, as: p1, tool: Gun }
+      - { do: character.equipTool, as: p2, tool: Gun }
+  - { expect: instance.hasTag, target: "@p1.character", tag: Hostile, within: 2s }
+  - { expect: instance.hasTag, target: "@p2.character", tag: Hostile, within: 2s }
+teardown:
+  - each:
+      actors: all
+      steps:
+        - { do: character.unequip, soft: true }

@@ -1,0 +1,15 @@
+name: blue-team-gun-hostile
+description: Blue spawn → equip gun → Hostile tag appears
+tags: [smoke, combat]
+session: { mode: play, players: 1 }
+vars:
+  spawn: [120, 5, -40]
+steps:
+  - { do: player.setTeam,      as: p1, team: Blue }
+  - { do: game.requestSpawn,   as: p1 }
+  - { wait: character.loaded,  as: p1, timeout: 10s }
+  - { do: character.teleport,  as: p1, to: $spawn }
+  - { do: character.equipTool, as: p1, tool: Gun }
+  - { expect: instance.hasTag, target: "@p1.character", tag: Hostile, within: 2s }
+teardown:
+  - { do: character.unequip, as: p1, soft: true }

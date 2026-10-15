@@ -1,0 +1,12 @@
+name: gui-spawn-button
+description: Clicking the SpawnButton fires RequestSpawn and the character loads at the team spawn
+tags: [smoke, gui]
+session: { players: 1, reset: hook }   # → mode: play; game.reset despawns between reused runs
+steps:
+  - { do: player.setTeam, as: p1, team: Red }
+  - { expect: lua, as: p1, code: "return player.Character == nil", label: no character before clicking }
+  - { wait: gui.visible, as: p1, target: "@p1.gui.SpawnGui.SpawnButton", timeout: 5s }
+  - { do: gui.click,     as: p1, target: "@p1.gui.SpawnGui.SpawnButton" }
+  - { wait: character.loaded, as: p1, timeout: 10s }
+  - { expect: character.near, as: p1, to: [40, 4, 0], radius: 15, label: "spawned on the Red SpawnLocation" }
+  - { expect: character.hasTool, as: p1, tool: Gun, equipped: false }

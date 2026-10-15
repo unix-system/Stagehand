@@ -1,0 +1,124 @@
+{
+  "name": "StagehandExample",
+  "tree": {
+    "$className": "DataModel",
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "CharacterAutoLoads": false
+      }
+    },
+    "Teams": {
+      "$className": "Teams",
+      "Blue": {
+        "$className": "Team",
+        "$properties": {
+          "TeamColor": { "BrickColor": 23 },
+          "AutoAssignable": false
+        }
+      },
+      "Red": {
+        "$className": "Team",
+        "$properties": {
+          "TeamColor": { "BrickColor": 21 },
+          "AutoAssignable": false
+        }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "Baseplate": {
+        "$className": "Part",
+        "$properties": {
+          "Anchored": true,
+          "Size": [256, 4, 256],
+          "CFrame": {
+            "CFrame": {
+              "position": [0, -2, 0],
+              "orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+            }
+          }
+        }
+      },
+      "Spawns": {
+        "$className": "Folder",
+        "Blue": {
+          "$className": "SpawnLocation",
+          "$properties": {
+            "Anchored": true,
+            "Neutral": false,
+            "AllowTeamChangeOnTouch": false,
+            "TeamColor": { "BrickColor": 23 },
+            "Size": [12, 1, 12],
+            "CFrame": {
+              "CFrame": {
+                "position": [-40, 0.5, 0],
+                "orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+              }
+            }
+          }
+        },
+        "Red": {
+          "$className": "SpawnLocation",
+          "$properties": {
+            "Anchored": true,
+            "Neutral": false,
+            "AllowTeamChangeOnTouch": false,
+            "TeamColor": { "BrickColor": 21 },
+            "Size": [12, 1, 12],
+            "CFrame": {
+              "CFrame": {
+                "position": [40, 0.5, 0],
+                "orientation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+              }
+            }
+          }
+        }
+      }
+    },
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Remotes": {
+        "$className": "Folder",
+        "RequestSpawn": {
+          "$className": "RemoteEvent"
+        }
+      },
+      "Packages": {
+        "$path": { "optional": "Packages" }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$path": "src/server"
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$path": "src/client"
+      }
+    },
+    "StarterPack": {
+      "$className": "StarterPack",
+      "Gun": {
+        "$className": "Tool",
+        "$properties": {
+          "RequiresHandle": true,
+          "CanBeDropped": false,
+          "ToolTip": "Gun (example, does not shoot)"
+        },
+        "Handle": {
+          "$className": "Part",
+          "$properties": {
+            "Size": [0.4, 0.8, 2],
+            "CanCollide": false
+          }
+        },
+        "HostileTagger": {
+          "$path": "src/tools/HostileTagger.server.luau"
+        }
+      }
+    }
+  }
+}

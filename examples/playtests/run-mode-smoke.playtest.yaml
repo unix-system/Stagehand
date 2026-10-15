@@ -1,0 +1,15 @@
+name: run-mode-smoke
+description: No characters — the example place's teams, spawns and remotes exist and are configured
+tags: [smoke]
+session: { players: 0 }            # → mode: run (server only, no clients)
+steps:
+  - { expect: instance.exists,   target: Teams.Blue }
+  - { expect: instance.exists,   target: Teams.Red }
+  - { expect: instance.property, target: Teams.Blue, prop: AutoAssignable, op: eq, value: false }
+  - { expect: instance.property, target: Teams.Red,  prop: AutoAssignable, op: eq, value: false }
+  - { expect: instance.exists,   target: ReplicatedStorage.Remotes.RequestSpawn }
+  - { expect: instance.property, target: ReplicatedStorage.Remotes.RequestSpawn, prop: ClassName, op: eq, value: RemoteEvent }
+  - { expect: instance.childCount, target: Workspace.Spawns, op: eq, value: 2 }
+  - { expect: instance.exists,   target: StarterPack.Gun.Handle }
+  - { expect: player.count, op: eq, value: 0 }
+  - { expect: log.noErrors }

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node (packages/mcp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install --no-frozen-lockfile; fi
+      - name: Build
+        run: pnpm --filter stagehand-mcp run --if-present build
+      - name: Test
+        run: pnpm --filter stagehand-mcp run --if-present test
+      - name: Typecheck
+        working-directory: packages/mcp
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+  examples:
+    name: Example playtests validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate examples/playtests against schema/playtest.schema.json
+        run: >
+          npx --yes -p ajv-cli@5 -p ajv-formats@3 --
+          ajv validate --spec=draft2020 --strict=false -c ajv-formats
+          -s schema/playtest.schema.json -d "examples/playtests/*.playtest.yaml"
+
+  luau:
+    name: Luau (plugin, hooks, tools)
+    runs-on: ubuntu-latest
+    env:
+      ROJO_VERSION: 7.5.1
+      LUNE_VERSION: 0.10.4
+      SELENE_VERSION: 0.29.0
+      STYLUA_VERSION: 2.1.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rojo, lune, selene, stylua
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin" /tmp/tools && cd /tmp/tools
+          fetch() { curl -fsSL -o "$1.zip" "$2" && unzip -oq "$1.zip" -d "$1" && find "$1" -type f -name "$1" -exec install -m 755 {} "$HOME/.local/bin/$1" \; ; }
+          fetch rojo   "https://github.com/rojo-rbx/rojo/releases/download/v${ROJO_VERSION}/rojo-${ROJO_VERSION}-linux-x86_64.zip"
+          fetch lune   "https://github.com/lune-org/lune/releases/download/v${LUNE_VERSION}/lune-${LUNE_VERSION}-linux-x86_64.zip"
+          fetch selene "https://github.com/Kampfkarren/selene/releases/download/${SELENE_VERSION}/selene-${SELENE_VERSION}-linux.zip"
+          fetch stylua "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64.zip"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Versions
+        run: rojo --version && lune --version && selene --version && stylua --version
+
+      - name: Selene
+        if: hashFiles('plugin/selene.toml') != ''
+        run: |
+          # selene resolves the roblox std relative to the config; run from plugin/ so its selene.toml applies.
+          cd plugin
+          selene generate-roblox-std
+          selene . ../hooks
+
+      - name: StyLua
+        if: hashFiles('plugin/stylua.toml') != ''
+        run: stylua --check --config-path plugin/stylua.toml plugin hooks tools examples/place/src
+
+      - name: Lune tests
+        if: hashFiles('plugin/tests/run.luau') != ''
+        run: lune run plugin/tests/run.luau
+
+      - name: Catalog is up to date
+        if: hashFiles('tools/gen-catalog.luau') != ''
+        run: |
+          # The generator writes to a temp path by default; pass the committed path explicitly
+          # so drift shows up as a diff on the CI checkout.
+          lune run tools/gen-catalog.luau schema/catalog.json
+          git diff --exit-code schema/catalog.json
+
+      - name: Build example place
+        run: rojo build examples/place -o StagehandExample.rbxl
+
+      - name: Build plugin
+        if: hashFiles('plugin/default.project.json') != ''
+        run: rojo build plugin -o Stagehand.rbxm
+
+      - name: Upload plugin artifact
+        if: hashFiles('Stagehand.rbxm') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stagehand.rbxm
+          path: Stagehand.rbxm
+          if-no-files-found: error
