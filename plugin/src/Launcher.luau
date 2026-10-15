@@ -26,7 +26,7 @@ function Launcher.new(opts: {
 	plugin: any,
 	port: number,
 	onRunModeStarted: ((string) -> ())?,
-	onSessionEnded: ((string) -> ())?,
+	onSessionEnded: ((string, boolean, any) -> ())?,
 })
 	return setmetatable({
 		plugin = opts.plugin,
@@ -120,7 +120,7 @@ function Launcher:_ended(sessionId: string, ok: boolean, result: any)
 		warn("[Stagehand] session " .. sessionId .. " failed: " .. tostring(result))
 	end
 	if self.onSessionEnded then
-		self.onSessionEnded(sessionId)
+		self.onSessionEnded(sessionId, ok, result)
 	end
 end
 

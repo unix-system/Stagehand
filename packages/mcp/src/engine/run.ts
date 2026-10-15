@@ -134,6 +134,8 @@ export class Run {
   private readonly failureOrder: string[] = [];
   private readonly softFailures: string[] = [];
   private readonly detailWaiters = new Map<string, Array<() => void>>();
+  /** Segments the daemon sent `cancel` for (abort/parallel failure/run cancel), not for a TIMEOUT. */
+  private readonly daemonCancelled = new Set<string>();
   private lastStarted: string | null = null;
   private readonly runCtrl = new AbortController();
   private abortKind: "failed" | "timeout" | "cancelled" | null = null;
@@ -292,6 +294,18 @@ export class Run {
         return;
       case "step.failed":
         if (typeof ev.durationMs === "number") rec.durationMs = ev.durationMs;
+        if (
+          (ev.error as ErrorObject | undefined)?.code === "CANCELLED" &&
+          typeof ev.segmentId === "string" &&
+          this.daemonCancelled.has(ev.segmentId) &&
+          rec.status !== "failed"
+        ) {
+          // A daemon-initiated cancel: the node reports it as step.failed{CANCELLED}; record it as cancelled.
+          if (!TERMINAL.has(rec.status)) rec.status = "cancelled";
+          rec.skipReason = "cancelled";
+          this.stepEvent(rec, "step.cancelled", { durationMs: rec.durationMs, reason: "cancelled" });
+          return;
+        }
         rec.reason = typeof ev.reason === "string" ? ev.reason : rec.reason;
         if ("expected" in ev) rec.expected = ev.expected;
         if ("actual" in ev) rec.actual = ev.actual;
@@ -627,6 +641,7 @@ export class Run {
       runId: this.id,
       segmentId: seg.id,
       vars: { ...this.vars },
+      actors: { ...(this.plan?.actors ?? {}) },
       steps: seg.steps.map((s) => this.toWire(s)),
     };
     const budget = seg.steps.reduce((a, s) => a + stepBudget(s), 0) + DAEMON_TIMEOUT_SLACK_MS;
@@ -641,6 +656,7 @@ export class Run {
     let onAbort: (() => void) | null = null;
     const graceP = new Promise<never>((_, reject) => {
       onAbort = () => {
+        this.daemonCancelled.add(seg.id);
         this.deps.registry.send(node.nodeId, "cancel", { segmentId: seg.id }, { timeoutMs: 5_000 }).catch(() => {});
         graceTimer = setTimeout(
           () => reject(new StagehandError("CANCELLED", `segment ${seg.id} cancelled (no result after cancel)`)),

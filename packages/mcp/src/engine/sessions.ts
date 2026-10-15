@@ -109,6 +109,17 @@ export class SessionManager {
         this.log(`adopted running session ${e.sessionId} (${players} players)`);
         this.scheduleIdle();
       }
+    } else if (e.kind === "event" && e.event.type === "session.ended") {
+      // The edit node saw Execute*Async return (test stopped in Studio, EndTest, crash).
+      const sid = typeof e.event.sessionId === "string" ? e.event.sessionId : null;
+      if (s && sid === s.sessionId && s.state !== "ending" && s.state !== "ended") {
+        this.clearIdle();
+        const why = typeof e.event.reason === "string" && e.event.reason ? e.event.reason : "ended in Studio";
+        this.log(`session ${s.sessionId} ended by the edit node: ${why}`);
+        this.markEnded(s, why);
+        // Rejects in-flight commands (run_segment) on the session's nodes with SESSION_ERROR.
+        this.registry.dropSession(s.sessionId, `session ended (${why})`);
+      }
     } else if (e.kind === "detached" && s && s.state === "ready") {
       if (e.node.role === "server" && e.node.sessionId === s.sessionId && e.reason !== "replaced by re-attach") {
         this.markEnded(s, `server node ${e.reason}`);
@@ -273,6 +284,8 @@ export class SessionManager {
     const n = ++this.resetCounter;
     const base = { params: {}, timeoutMs: 15_000, withinMs: null, soft: false, label: null, save: null };
     const steps: WireStep[] = [];
+    const actors: Record<string, number> = {};
+    for (let i = 1; i <= s.players; i++) actors[`p${i}`] = i;
     if (policy === "respawn") {
       for (let i = 1; i <= s.players; i++) {
         const actor = { name: `p${i}`, playerIndex: i };
@@ -286,7 +299,7 @@ export class SessionManager {
       const res = (await this.registry.send(
         server.nodeId,
         "run_segment",
-        { runId: `reset_${s.sessionId}_${n}`, segmentId: `reset_${n}`, vars: {}, steps },
+        { runId: `reset_${s.sessionId}_${n}`, segmentId: `reset_${n}`, vars: {}, actors, steps },
         { timeoutMs: this.resetTimeoutMs, signal: signal },
       )) as RunSegmentResult;
       if (res?.status !== "passed") throw new StagehandError("SESSION_ERROR", `reset (${policy}) ${res?.status ?? "failed"}`);

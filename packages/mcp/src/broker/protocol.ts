@@ -161,12 +161,16 @@ export interface WireStep {
   actor: Actor | null;
   label: string | null;
   save: string | null;
+  /** Optional on the wire; the daemon evaluates `if:` itself and never sends it (nodes honour it if present). */
+  if?: string;
 }
 
 export interface RunSegmentParams {
   runId: string;
   segmentId: string;
   vars: Record<string, unknown>;
+  /** Full actor map (name -> playerIndex: p1..pN plus aliases), sent on every run_segment. */
+  actors: Record<string, number>;
   steps: WireStep[];
 }
 

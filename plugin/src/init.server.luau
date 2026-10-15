@@ -71,6 +71,7 @@ local function main()
 
 	local launcher = nil
 	local runModeNode = nil
+	local node = nil
 	if role == "edit" then
 		local Launcher = require(script.Launcher)
 		launcher = Launcher.new({
@@ -92,16 +93,25 @@ local function main()
 				})
 				runModeNode:start()
 			end,
-			onSessionEnded = function()
+			onSessionEnded = function(sid, ok, result)
 				if runModeNode then
 					runModeNode:stop()
 					runModeNode = nil
+				end
+				-- Tell the daemon the test is over (stopped in Studio, EndTest, or Execute*Async errored).
+				if node then
+					node:emit({
+						type = "session.ended",
+						sessionId = sid,
+						ok = ok,
+						reason = if ok then "ended in Studio" else "Studio test failed: " .. tostring(result),
+					})
 				end
 			end,
 		})
 	end
 
-	local node = Node.new({
+	node = Node.new({
 		role = role,
 		plugin = plugin,
 		transport = transport,
