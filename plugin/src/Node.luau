@@ -512,10 +512,9 @@ function handlers.progress(self, params)
 	if self.role == "server" or not self.plugin then
 		Errors.throw("UNKNOWN_COMMAND", "progress is shown by edit and client nodes")
 	end
-	-- In Play solo the client shares the main window, where the edit node's widget already shows.
-	if self.role == "client" and self.mode ~= "multiplayer" then
-		return Json.object({})
-	end
+	-- Every client shows its own widget: multiplayer clients have their own windows, and in Play solo
+	-- the main window displays the play DataModel, which hides the edit node's widgets until the test
+	-- stops (verified live: the edit widget was Enabled but invisible).
 	if not self.progressUI then
 		-- required lazily: Studio-only widget code
 		self.progressUI = require(script.Parent.UI.Progress).new(self.plugin)

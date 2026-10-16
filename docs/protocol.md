@@ -150,9 +150,10 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 `progress` drives the "Stagehand Progress" dock widget in every Studio window of a test. The daemon sends
 the whole snapshot to the newest edit node and to every client node of the run's session once the session
 is ready, whenever a step changes (coalesced to one send per 150 ms), and once when the run finishes.
-Failures to deliver are ignored. The edit node's widget covers the main window (Play solo, or the
-multiplayer server window); a client node shows its own widget only in a multiplayer test, where it has a
-window of its own (in Play solo it shares the main window and the command is a no-op). Snapshot:
+Failures to deliver are ignored. The edit node's widget covers the main window in Run mode and in a
+multiplayer test (where the main window stays on the edit DataModel); every client node shows its own
+widget, because in Play solo the main window displays the client DataModel and hides the edit node's
+widgets until the test stops, and multiplayer clients have windows of their own. Snapshot:
 
 ```json
 {
