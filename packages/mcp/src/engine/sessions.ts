@@ -35,6 +35,8 @@ export interface SessionManagerOptions {
   idleTimeoutMs?: number;
   endTimeoutMs?: number;
   resetTimeoutMs?: number;
+  /** Wait after ending a stray Studio test before launching (default 1000). */
+  strayEndSettleMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -53,6 +55,7 @@ export class SessionManager {
   readonly idleTimeoutMs: number;
   readonly endTimeoutMs: number;
   readonly resetTimeoutMs: number;
+  readonly strayEndSettleMs: number;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -62,6 +65,7 @@ export class SessionManager {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
     this.endTimeoutMs = opts.endTimeoutMs ?? 10_000;
     this.resetTimeoutMs = opts.resetTimeoutMs ?? 30_000;
+    this.strayEndSettleMs = opts.strayEndSettleMs ?? 1_000;
     this.unsub = registry.on((e) => this.onRegistry(e));
   }
 
@@ -210,6 +214,7 @@ export class SessionManager {
     this.session = s;
     o.onProgress?.(`launching ${mode} session ${sessionId} with ${cfg.players} player(s)`);
     try {
+      await this.endStrayTests(edit.placeId, o.signal);
       await this.registry.send(
         edit.nodeId,
         "launch_session",
@@ -223,6 +228,27 @@ export class SessionManager {
       throw err.code === "CANCELLED" ? err : new StagehandError("SESSION_ERROR", `session launch failed: ${err.message}`, err.toObject());
     }
     return { sessionId, mode, players: s.players, placeId: s.placeId, reused: false, record: s };
+  }
+
+  /**
+   * A test left running in Studio (plugin reload, manual Play, crashed run) makes Execute*Async fail
+   * with "a previous one is still in progress". Any server node of this place attached now belongs to
+   * such a test: end it first.
+   */
+  private async endStrayTests(placeId: number, signal?: AbortSignal): Promise<void> {
+    const strays = this.registry.list().filter((n) => n.role === "server" && n.placeId === placeId);
+    if (strays.length === 0) return;
+    this.log(`ending ${strays.length} stray test(s) before launch: ${strays.map((n) => n.nodeId).join(", ")}`);
+    await Promise.all(
+      strays.map(async (n) => {
+        await this.registry
+          .send(n.nodeId, "end_session", { sessionId: n.sessionId }, { timeoutMs: this.endTimeoutMs, signal })
+          .catch(() => {});
+        this.registry.drop(n.nodeId, "stray test ended before launch");
+      }),
+    );
+    // ponytail: fixed settle delay for Studio's teardown; poll StudioTestService state if 1s proves flaky
+    await new Promise((r) => setTimeout(r, this.strayEndSettleMs));
   }
 
   private readyProblems(s: SessionRecord): string[] {

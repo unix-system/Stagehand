@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunEvent } from "../src/engine/types.js";
+import { waitFor } from "./helpers/fakeNode.js";
 import type { StepImpl } from "./helpers/fakeStudio.js";
 import { type Harness, startHarness } from "./helpers/harness.js";
 import { BLUE_TEAM, NIGHT_MODE, TWO_PLAYER } from "./fixtures.js";
@@ -57,6 +58,16 @@ function files(dir: string) {
 }
 
 describe("runner: blue-team example end to end", () => {
+  it("pushes progress snapshots to the edit node and every client, ending with the final status", async () => {
+    h = await startHarness({ impl: blueWorld() });
+    const r = await h.daemon.runs.start({ input: BLUE_TEAM }).done;
+    await waitFor(() => h!.studio.progress.some((p) => p.status === "passed"));
+    await waitFor(() => h!.studio.clientProgress.some((p) => p.playerIndex === 1 && p.snapshot.status === "passed"));
+    const last = h.studio.progress.at(-1);
+    expect(last).toMatchObject({ runId: r.runId, status: "passed", total: r.steps.length, finished: r.steps.length });
+    expect(last.steps[0]).toMatchObject({ id: r.steps[0]!.id, target: r.steps[0]!.target, status: "passed" });
+  });
+
   it("produces a passing report", async () => {
     h = await startHarness({ impl: blueWorld() });
     const run = h.daemon.runs.start({ input: BLUE_TEAM });

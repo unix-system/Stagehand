@@ -42,11 +42,14 @@ function Node.new(opts: { [string]: any })
 		transport = opts.transport,
 		sessionId = opts.sessionId,
 		expectedPlayers = opts.expectedPlayers,
+		mode = opts.mode, -- test mode from GetTestArgs (run | play | multiplayer), nil on edit
 		version = opts.version or "0.1.0",
 		logCapture = opts.logCapture,
 		launcher = opts.launcher,
 		registry = opts.registry or Registry.new(opts.role),
 		nodeId = nil,
+		-- re-attach key; placeId alone collides across unpublished places (all 0)
+		instanceId = string.format("%08x-%08x", math.random(0, 0x7fffffff), math.random(0, 0x7fffffff)),
 		playerIndex = nil,
 		seq = 0,
 		queue = {},
@@ -181,6 +184,7 @@ function Node:_attachOnce(): (boolean, string?)
 		"playerIndex",
 		"pluginVersion",
 		"transport",
+		"instanceId",
 	}, {
 		protocolVersion = Node.PROTOCOL_VERSION,
 		role = self.role,
@@ -192,6 +196,7 @@ function Node:_attachOnce(): (boolean, string?)
 		playerIndex = Json.null,
 		pluginVersion = self.version,
 		transport = self.transport.kind or "http",
+		instanceId = self.instanceId,
 	})
 	local status, data, err = self.transport:request("POST", "/attach", body)
 	if status == 200 and type(data) == "table" and data.nodeId then
@@ -324,6 +329,10 @@ function Node:stop()
 	self.runner:cancel("all")
 	if self.logCapture then
 		self.logCapture:stop()
+	end
+	if self.progressUI then
+		self.progressUI:destroy()
+		self.progressUI = nil
 	end
 	self:_setState("stopped", nil)
 end
@@ -481,6 +490,22 @@ local handlers = {}
 
 function handlers.ping(_self, _params)
 	return { pong = true, t = Env.clock() * 1000 }
+end
+
+function handlers.progress(self, params)
+	if self.role == "server" or not self.plugin then
+		Errors.throw("UNKNOWN_COMMAND", "progress is shown by edit and client nodes")
+	end
+	-- In Play solo the client shares the main window, where the edit node's widget already shows.
+	if self.role == "client" and self.mode ~= "multiplayer" then
+		return Json.object({})
+	end
+	if not self.progressUI then
+		-- required lazily: Studio-only widget code
+		self.progressUI = require(script.Parent.UI.Progress).new(self.plugin)
+	end
+	self.progressUI:update(params, if self.role == "client" then "client#" .. tostring(self.playerIndex) else nil)
+	return Json.object({})
 end
 
 function handlers.cancel(self, params)

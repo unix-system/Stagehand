@@ -53,7 +53,8 @@ Request:
   "userId": -1,
   "playerIndex": null,
   "pluginVersion": "0.1.0",
-  "transport": "http"
+  "transport": "http",
+  "instanceId": "9f3a1c2e-41b07d55"
 }
 ```
 
@@ -67,7 +68,8 @@ Request:
 | `userId` | integer \| null | client only; Studio test users are negative |
 | `playerIndex` | null | always null from nodes; the broker assigns it |
 | `pluginVersion` | string | semver |
-| `transport` | `"http" \| "remote"` | `remote` = injected client relayed through the server node |
+| `transport` | `"http" \| "remote"` | `remote` = client node relayed through the server node (play clients cannot use HttpService) |
+| `instanceId` | string, optional | random per plugin Node, stable across its re-attaches |
 
 Response:
 
@@ -75,8 +77,10 @@ Response:
 { "nodeId": "n_7", "playerIndex": 1, "pollTimeoutMs": 25000, "eventFlushMs": 50, "brokerVersion": "0.1.0" }
 ```
 
-Re-attaching with the same `{role, sessionId, userId}` (or `{role:"edit", placeId}`) replaces the old node,
-keeps its `playerIndex`, and drops the old node's queued commands with `CANCELLED`.
+Re-attaching with the same `instanceId` (or, when absent, the same `{role, sessionId, userId}` /
+`{role:"edit", placeId}`) replaces the old node, keeps its `playerIndex`, and drops the old node's queued
+commands with `CANCELLED`. `instanceId` keeps two Studio windows with unpublished places (both `placeId` 0)
+from evicting each other in a loop.
 
 ### playerIndex assignment
 
@@ -141,6 +145,30 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed" }` | `{ "ended": true, "via": "EndTest" \| "RunService.Stop" }` |
 | `add_players` | server | `{ "count": 1..7 }` | `{ "requested": 1 }` |
 | `ping` | any | `{}` | `{ "pong": true, "t": 1234.5 }` |
+| `progress` | edit, client | Progress snapshot (below) | `{}` |
+
+`progress` drives the "Stagehand Progress" dock widget in every Studio window of a test. The daemon sends
+the whole snapshot to the newest edit node and to every client node of the run's session once the session
+is ready, whenever a step changes (coalesced to one send per 150 ms), and once when the run finishes.
+Failures to deliver are ignored. The edit node's widget covers the main window (Play solo, or the
+multiplayer server window); a client node shows its own widget only in a multiplayer test, where it has a
+window of its own (in Play solo it shares the main window and the command is a no-op). Snapshot:
+
+```json
+{
+  "runId": "r_…", "name": "smoke-play", "status": "running",
+  "total": 11, "finished": 4,
+  "steps": [
+    { "id": "steps.0", "display": "wait character.alive as p1", "target": "server", "status": "passed" },
+    { "id": "steps.5", "display": "expect character.health as p1 on client", "target": "client#1",
+      "status": "failed", "reason": "condition character.health not true within 3s" }
+  ]
+}
+```
+
+`status` (run): `running | passed | failed | cancelled | error`. Step `status`: `pending | running | passed |
+failed | skipped | cancelled`. `target`: `server | client#N | edit | daemon`; the widget groups its
+per-client summary by it, and a client's widget marks its own `client#<playerIndex>` steps.
 
 `launch_session` on the edit node: write the `Stagehand.Session` setting, then call (in a new thread)
 `ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAsync(args)` for `play`,

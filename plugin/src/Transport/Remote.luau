@@ -1,18 +1,17 @@
 --!nonstrict
 --[[
-	Fallback transport (skeleton): relay node ↔ broker traffic through the server node over a
-	RemoteFunction, for an *injected* client runtime (a LocalScript copy of the node) in case Phase 0
-	shows plugins do not load in simulated client DataModels (docs/architecture.md "Platform facts").
+	Client transport: relay node ↔ broker traffic through the server node over a RemoteFunction,
+	because HttpService refuses requests in a Studio play client. Bodies cross as JSON text.
 
 	  client node:  Remote.client():request(method, path, body)  → InvokeServer({method, path, body})
 	  server node:  Remote.serve(httpTransport)                   → OnServerInvoke relays over HTTP
 
-	Messages are identical to Transport/Http; attach bodies are forced to transport = "remote".
-	Selected by USE_REMOTE_RELAY in init.server.luau (off by default). Only /attach, /poll, /result
-	and /events are relayed.
+	Messages are identical to Transport/Http (attach sends transport = Remote.kind). Selected by
+	Config.USE_REMOTE_RELAY. Only /attach, /poll, /result and /events are relayed.
 ]]
 
 local Env = require(script.Parent.Parent.Env)
+local Json = require(script.Parent.Parent.Json)
 
 local Remote = {}
 Remote.__index = Remote
@@ -42,11 +41,13 @@ function Remote.serve(http)
 		if type(req) ~= "table" or type(req.path) ~= "string" or not allowed(req.path) then
 			return { status = 400, data = { error = { code = "BAD_REQUEST", message = "relay: path not allowed" } } }
 		end
-		local body = req.body
-		if req.path == "/attach" and type(body) == "table" then
-			body.transport = "remote"
+		if req.body ~= nil and type(req.body) ~= "string" then
+			return {
+				status = 400,
+				data = { error = { code = "BAD_REQUEST", message = "relay: body must be JSON text" } },
+			}
 		end
-		local status, data, err = http:request(req.method or "GET", req.path, body)
+		local status, data, err = http:request(req.method or "GET", req.path, req.body)
 		return { status = status, data = data, err = err }
 	end
 	return rf
@@ -64,7 +65,8 @@ function Remote:request(method: string, path: string, body: any?): (number, any,
 		return 0, nil, "relay " .. Remote.NAME .. " not found"
 	end
 	local ok, res = pcall(function()
-		return rf:InvokeServer({ method = method, path = path, body = body })
+		-- Encode here: Json.null / ordered / array markers do not survive a RemoteFunction.
+		return rf:InvokeServer({ method = method, path = path, body = if body ~= nil then Json.encode(body) else nil })
 	end)
 	if not ok or type(res) ~= "table" then
 		return 0, nil, tostring(res)

@@ -4,7 +4,7 @@ return {
 	DEFAULT_PORT = 38491,
 	SETTING_SESSION = "Stagehand.Session",
 	SETTING_PORT = "Stagehand.Port",
-	-- Fallback transport (Transport/Remote): client nodes relay through the server node over a
-	-- RemoteFunction instead of talking HTTP directly. Only for an injected client runtime.
-	USE_REMOTE_RELAY = false,
+	-- Client nodes relay through the server node over a RemoteFunction (Transport/Remote): in a
+	-- Studio play client HttpService errors "Http requests can only be executed by game server".
+	USE_REMOTE_RELAY = true,
 }

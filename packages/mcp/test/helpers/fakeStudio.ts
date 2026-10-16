@@ -47,6 +47,10 @@ export class FakeStudio {
   sessionNodes: FakeNode[] = [];
   readonly launches: any[] = [];
   readonly ends: Array<{ role: string; params: any }> = [];
+  /** `progress` snapshots received by the edit node. */
+  readonly progress: any[] = [];
+  /** `progress` snapshots received by client nodes. */
+  readonly clientProgress: Array<{ playerIndex: number | null; snapshot: any }> = [];
   readonly segments: Array<{ role: string; playerIndex: number | null; params: any }> = [];
   world: Record<string, any> = {};
 
@@ -66,6 +70,7 @@ export class FakeStudio {
           return { ended: true, via: "RunService.Stop" };
         },
         run_segment: (p, n) => this.runSegment(p, n, "edit", null, null),
+        progress: (p) => (this.progress.push(p), {}),
       },
     });
   }
@@ -88,6 +93,7 @@ export class FakeStudio {
       userId: role === "client" ? -i : null,
       handlers: {
         catalog: () => ({ entries: role === "server" ? (this.opts.gameEntries ?? []) : [] }),
+        progress: (p) => (this.clientProgress.push({ playerIndex: node.playerIndex, snapshot: p }), {}),
         run_segment: (p, n) => this.runSegment(p, n, role, role === "client" ? n.playerIndex : null, sessionId),
         end_session: async (p) => {
           this.ends.push({ role, params: p });

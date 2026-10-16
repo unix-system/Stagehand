@@ -26,6 +26,7 @@ export interface NodeInfo {
   playerIndex: number | null;
   pluginVersion: string;
   transport: "http" | "remote";
+  instanceId: string | null;
   orphan: boolean;
   attachedAt: number;
   lastSeen: number;
@@ -141,12 +142,12 @@ export class NodeRegistry {
   }
 
   findEdit(placeId?: number | null): NodeInfo | undefined {
-    const edits = this.list().filter((n) => n.role === "edit");
-    if (placeId != null) {
-      const m = edits.find((n) => n.placeId === placeId);
-      if (m) return m;
-    }
-    return edits.sort((a, b) => b.lastSeen - a.lastSeen)[0];
+    // Newest attach first: a reloaded plugin gets a new instanceId, and its stale predecessor lingers
+    // until it expires.
+    const edits = this.list()
+      .filter((n) => n.role === "edit")
+      .reverse(); // Map keeps insertion (= attach) order
+    return (placeId != null && edits.find((n) => n.placeId === placeId)) || edits[0];
   }
 
   findServer(sessionId: string): NodeInfo | undefined {
@@ -182,6 +183,11 @@ export class NodeRegistry {
     }
   }
 
+  /** Drop one node (e.g. a stray server after end_session). */
+  drop(nodeId: string, reason: string): void {
+    if (this.nodes.has(nodeId)) this.detach(nodeId, reason);
+  }
+
   /** Drop every node of a session (e.g. after end_session). */
   dropSession(sessionId: string, reason: string): void {
     for (const r of [...this.nodes.values()]) {
@@ -193,9 +199,10 @@ export class NodeRegistry {
 
   attach(req: AttachRequest): AttachResponse {
     const now = Date.now();
-    // Re-attach key: {role, sessionId, userId} or {role:"edit", placeId}.
+    // Re-attach key: instanceId when sent, else {role, sessionId, userId} or {role:"edit", placeId}.
     const prev = [...this.nodes.values()].find((r) => {
       const i = r.info;
+      if (req.instanceId != null || i.instanceId != null) return i.instanceId === req.instanceId;
       if (i.role !== req.role) return false;
       if (req.role === "edit") return i.placeId === req.placeId;
       return i.sessionId === req.sessionId && i.userId === req.userId;
@@ -229,6 +236,7 @@ export class NodeRegistry {
       playerIndex: req.role === "client" ? playerIndex : null,
       pluginVersion: req.pluginVersion,
       transport: req.transport,
+      instanceId: req.instanceId,
       orphan,
       attachedAt: now,
       lastSeen: now,

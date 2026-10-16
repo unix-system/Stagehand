@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeSession } from "../src/engine/compile.js";
-import { waitFor } from "./helpers/fakeNode.js";
+import { FakeNode, waitFor } from "./helpers/fakeNode.js";
 import { type Harness, startHarness } from "./helpers/harness.js";
 
 let h: Harness | null = null;
@@ -26,6 +26,23 @@ describe("session manager", () => {
     expect(h.daemon.registry.findClient(handle.sessionId!, 2)!.userId).toBe(-2);
     expect(progress.join("\n")).toMatch(/launching multiplayer/);
     expect(h.daemon.broker.health().sessions).toEqual([{ sessionId: handle.sessionId, mode: "multiplayer", players: 2, state: "ready" }]);
+  });
+
+  it("ends a stray Studio test (orphan server node) before launching", async () => {
+    h = await startHarness();
+    const ended: unknown[] = [];
+    const stray = new FakeNode(h.studio.base, { role: "server", handlers: { end_session: (p) => (ended.push(p), { ended: true, via: "EndTest" }) } });
+    await stray.attach();
+    const strayId = stray.nodeId;
+    stray.start();
+    try {
+      const handle = await h.daemon.sessions.ensure(cfg(1));
+      expect(ended).toEqual([{ sessionId: null }]);
+      expect(h.daemon.registry.has(strayId)).toBe(false);
+      expect(h.studio.launches).toEqual([{ sessionId: handle.sessionId, mode: "play", players: 1 }]);
+    } finally {
+      await stray.stop();
+    }
   });
 
   it("renumbers clients that attached out of order (server-confirmed)", async () => {
