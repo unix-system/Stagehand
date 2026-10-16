@@ -1,7 +1,8 @@
 -- Wires the plugin's Env seam to Lune's Roblox datatypes and a fresh stub DataModel.
 local roblox = require("@lune/roblox")
+local H = require("./harness")
 local task = require("@lune/task")
-local Env = require("../src/Env")
+local Env = H.require(H.src.Env)
 
 local Setup = {}
 

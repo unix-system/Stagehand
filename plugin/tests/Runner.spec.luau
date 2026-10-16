@@ -1,8 +1,8 @@
 local H = require("./harness")
 local Setup = require("./setup")
-local Runner = require("../src/Runner")
-local Registry = require("../src/Registry")
-local LogCapture = require("../src/LogCapture")
+local Runner = H.require(H.src.Runner)
+local Registry = H.require(H.src.Registry)
+local LogCapture = H.require(H.src.LogCapture)
 
 local describe, it, eq, truthy = H.describe, H.it, H.eq, H.truthy
 

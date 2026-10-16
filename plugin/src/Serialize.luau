@@ -5,8 +5,8 @@
 	EnumItem → "Enum.X.Y", Instance → full-name path, other userdata → tostring(v).
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Json = if script then require(script.Parent.Json) else require("./Json")
+local Env = require(script.Parent.Env)
+local Json = require(script.Parent.Json)
 
 local Serialize = {}
 

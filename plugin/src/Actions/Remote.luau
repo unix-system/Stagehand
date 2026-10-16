@@ -1,10 +1,10 @@
 --!nonstrict
 -- remote.* actions
 
-local Meta = if script then require(script.Parent.Parent.Meta) else require("../Meta")
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
-local Errors = if script then require(script.Parent.Parent.Errors) else require("../Errors")
-local Resolve = if script then require(script.Parent.Parent.Resolve) else require("../Resolve")
+local Meta = require(script.Parent.Parent.Meta)
+local Env = require(script.Parent.Parent.Env)
+local Errors = require(script.Parent.Parent.Errors)
+local Resolve = require(script.Parent.Parent.Resolve)
 
 local S = Meta.S
 local NAME_DESC = "Remote name (searched recursively in ReplicatedStorage) or selector"

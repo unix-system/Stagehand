@@ -9,14 +9,14 @@
 	waits and running actions stop promptly.
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Errors = if script then require(script.Parent.Errors) else require("./Errors")
-local Json = if script then require(script.Parent.Json) else require("./Json")
-local Resolve = if script then require(script.Parent.Resolve) else require("./Resolve")
-local Conditions = if script then require(script.Parent.Conditions) else require("./Conditions")
-local Serialize = if script then require(script.Parent.Serialize) else require("./Serialize")
-local Signal = if script then require(script.Parent.Signal) else require("./Signal")
-local Lua = if script then require(script.Parent.Actions.Lua) else require("./Actions/Lua")
+local Env = require(script.Parent.Env)
+local Errors = require(script.Parent.Errors)
+local Json = require(script.Parent.Json)
+local Resolve = require(script.Parent.Resolve)
+local Conditions = require(script.Parent.Conditions)
+local Serialize = require(script.Parent.Serialize)
+local Signal = require(script.Parent.Signal)
+local Lua = require(script.Parent.Actions.Lua)
 
 local Runner = {}
 Runner.__index = Runner

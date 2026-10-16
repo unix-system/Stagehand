@@ -8,9 +8,9 @@
 	(respawned characters, re-created GUIs).
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Errors = if script then require(script.Parent.Errors) else require("./Errors")
-local Serialize = if script then require(script.Parent.Serialize) else require("./Serialize")
+local Env = require(script.Parent.Env)
+local Errors = require(script.Parent.Errors)
+local Serialize = require(script.Parent.Serialize)
 
 local Conditions = {}
 

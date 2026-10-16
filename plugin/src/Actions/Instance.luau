@@ -1,11 +1,11 @@
 --!nonstrict
 -- instance.* actions and conditions
 
-local Meta = if script then require(script.Parent.Parent.Meta) else require("../Meta")
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
-local Errors = if script then require(script.Parent.Parent.Errors) else require("../Errors")
-local Resolve = if script then require(script.Parent.Parent.Resolve) else require("../Resolve")
-local Conditions = if script then require(script.Parent.Parent.Conditions) else require("../Conditions")
+local Meta = require(script.Parent.Parent.Meta)
+local Env = require(script.Parent.Parent.Env)
+local Errors = require(script.Parent.Parent.Errors)
+local Resolve = require(script.Parent.Parent.Resolve)
+local Conditions = require(script.Parent.Parent.Conditions)
 
 local S = Meta.S
 local ALL = { "edit", "server", "client" }

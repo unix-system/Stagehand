@@ -5,8 +5,8 @@
 	(the plugin's own diagnostics) are kept out of the event stream so they never fail a step.
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Signal = if script then require(script.Parent.Signal) else require("./Signal")
+local Env = require(script.Parent.Env)
+local Signal = require(script.Parent.Signal)
 
 local LogCapture = {}
 LogCapture.__index = LogCapture

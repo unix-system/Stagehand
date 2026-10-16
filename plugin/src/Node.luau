@@ -7,16 +7,16 @@
 	  connection failure        → exponential backoff (0.5 s … 10 s), then re-attach
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Errors = if script then require(script.Parent.Errors) else require("./Errors")
-local Json = if script then require(script.Parent.Json) else require("./Json")
-local Registry = if script then require(script.Parent.Registry) else require("./Registry")
-local Runner = if script then require(script.Parent.Runner) else require("./Runner")
-local Conditions = if script then require(script.Parent.Conditions) else require("./Conditions")
-local Inspect = if script then require(script.Parent.Inspect) else require("./Inspect")
-local Serialize = if script then require(script.Parent.Serialize) else require("./Serialize")
-local Signal = if script then require(script.Parent.Signal) else require("./Signal")
-local Lua = if script then require(script.Parent.Actions.Lua) else require("./Actions/Lua")
+local Env = require(script.Parent.Env)
+local Errors = require(script.Parent.Errors)
+local Json = require(script.Parent.Json)
+local Registry = require(script.Parent.Registry)
+local Runner = require(script.Parent.Runner)
+local Conditions = require(script.Parent.Conditions)
+local Inspect = require(script.Parent.Inspect)
+local Serialize = require(script.Parent.Serialize)
+local Signal = require(script.Parent.Signal)
+local Lua = require(script.Parent.Actions.Lua)
 
 local Node = {}
 Node.__index = Node

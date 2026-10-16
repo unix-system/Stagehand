@@ -1,8 +1,8 @@
 local H = require("./harness")
 local Setup = require("./setup")
-local Conditions = require("../src/Conditions")
-local Signal = require("../src/Signal")
-local Env = require("../src/Env")
+local Conditions = H.require(H.src.Conditions)
+local Signal = H.require(H.src.Signal)
+local Env = H.require(H.src.Env)
 
 local describe, it, eq, truthy = H.describe, H.it, H.eq, H.truthy
 

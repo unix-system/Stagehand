@@ -1,11 +1,11 @@
 --!nonstrict
 -- gui.* actions and conditions (client only)
 
-local Meta = if script then require(script.Parent.Parent.Meta) else require("../Meta")
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
-local Errors = if script then require(script.Parent.Parent.Errors) else require("../Errors")
-local Conditions = if script then require(script.Parent.Parent.Conditions) else require("../Conditions")
-local Input = if script then require(script.Parent.Input) else require("./Input")
+local Meta = require(script.Parent.Parent.Meta)
+local Env = require(script.Parent.Parent.Env)
+local Errors = require(script.Parent.Parent.Errors)
+local Conditions = require(script.Parent.Parent.Conditions)
+local Input = require(script.Parent.Input)
 
 local S = Meta.S
 local C = { "client" }

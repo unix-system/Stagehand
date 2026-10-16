@@ -9,7 +9,7 @@
 	Action run returns the value storable with `save`. Condition run returns (ok, actual, expected?).
 ]]
 
-local Json = if script then require(script.Parent.Json) else require("./Json")
+local Json = require(script.Parent.Json)
 
 local Meta = {}
 

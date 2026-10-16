@@ -80,7 +80,7 @@ function Dock.new(plugin: Plugin, node: any, launcher: any, port: number)
 
 	local log = Instance.new("ScrollingFrame")
 	log.Name = "Log"
-	log.Position = UDim2.new(0, 0, 0, 84)
+	log.Position = UDim2.fromOffset(0, 84)
 	log.Size = UDim2.new(1, 0, 1, -90)
 	log.BackgroundColor3 = themeColor("InputFieldBackground", Color3.fromRGB(37, 37, 37))
 	log.BorderSizePixel = 0

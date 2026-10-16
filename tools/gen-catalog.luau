@@ -19,8 +19,9 @@ local fs = require("@lune/fs")
 local process = require("@lune/process")
 local stdio = require("@lune/stdio")
 
-local Json = require("../plugin/src/Json")
-local Registry = require("../plugin/src/Registry")
+local Loader = require("./lib/loader")
+local Json = Loader.requireModule(Loader.src.Json)
+local Registry = Loader.requireModule(Loader.src.Registry)
 local header = require("./catalog-header")
 
 local function generate(): string

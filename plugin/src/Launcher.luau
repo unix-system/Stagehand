@@ -13,9 +13,9 @@
 	an in-process server node.
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Errors = if script then require(script.Parent.Errors) else require("./Errors")
-local Signal = if script then require(script.Parent.Signal) else require("./Signal")
+local Env = require(script.Parent.Env)
+local Errors = require(script.Parent.Errors)
+local Signal = require(script.Parent.Signal)
 
 local Launcher = {}
 Launcher.__index = Launcher

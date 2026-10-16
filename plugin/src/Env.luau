@@ -4,7 +4,7 @@
 
 	Every module reaches Roblox services/datatypes through Env, never at require time, so the
 	pure parts (Resolve, Conditions, Registry, Actions metas) load under Lune. Tests call
-	Env.override({ game = stubDataModel, task = require("@lune/task"), ... }).
+	Env.override({ game = stubDataModel, task = <@lune/task>, ... }).
 ]]
 
 local Env = {}

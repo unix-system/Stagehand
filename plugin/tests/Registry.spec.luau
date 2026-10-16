@@ -2,9 +2,9 @@ local fs = require("@lune/fs")
 local serde = require("@lune/serde")
 local H = require("./harness")
 local Setup = require("./setup")
-local Registry = require("../src/Registry")
-local Json = require("../src/Json")
-local sha1 = require("../src/Sha1")
+local Registry = H.require(H.src.Registry)
+local Json = H.require(H.src.Json)
+local sha1 = H.require(H.src.Sha1)
 
 local describe, it, eq, truthy = H.describe, H.it, H.eq, H.truthy
 
@@ -77,7 +77,7 @@ describe("Registry", function()
 		bf.Name = "Invoke"
 		bf.Parent = folder
 		-- Lune instances cannot run OnInvoke; stand in for the bridge with a table
-		local GameHooks = require("../src/Actions/GameHooks")
+		local GameHooks = H.require(H.src.Actions.GameHooks)
 		local original = GameHooks.bridge
 		GameHooks.bridge = function()
 			return {

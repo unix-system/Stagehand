@@ -12,8 +12,8 @@
 	Name matching is exact; the first segment of a path falls back to game:GetService(name).
 ]]
 
-local Env = if script then require(script.Parent.Env) else require("./Env")
-local Errors = if script then require(script.Parent.Errors) else require("./Errors")
+local Env = require(script.Parent.Env)
+local Errors = require(script.Parent.Errors)
 
 local Resolve = {}
 

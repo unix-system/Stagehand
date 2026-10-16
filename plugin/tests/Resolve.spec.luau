@@ -1,6 +1,6 @@
 local H = require("./harness")
 local Setup = require("./setup")
-local Resolve = require("../src/Resolve")
+local Resolve = H.require(H.src.Resolve)
 
 local describe, it, eq, truthy, throws = H.describe, H.it, H.eq, H.truthy, H.throws
 
@@ -215,7 +215,7 @@ describe("Value coercion", function()
 		eq(out.d, "$nope")
 	end)
 	it("applies catalog params: defaults, coercion, validation", function()
-		local Registry = require("../src/Registry")
+		local Registry = H.require(H.src.Registry)
 		local reg = Registry.new("server")
 		local near = reg:get("character.near").meta.params
 		local p = Resolve.applyParams(near, { to = { 1, 2, 3 } }, {})

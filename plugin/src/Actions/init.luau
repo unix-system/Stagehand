@@ -3,29 +3,16 @@
 
 local Actions = {}
 
-if script then
-	Actions.Session = require(script.Session)
-	Actions.Player = require(script.Player)
-	Actions.Character = require(script.Character)
-	Actions.Input = require(script.Input)
-	Actions.Gui = require(script.Gui)
-	Actions.Remote = require(script.Remote)
-	Actions.Instance = require(script.Instance)
-	Actions.Log = require(script.Log)
-	Actions.GameHooks = require(script.GameHooks)
-	Actions.Lua = require(script.Lua)
-else
-	Actions.Session = require("@self/Session")
-	Actions.Player = require("@self/Player")
-	Actions.Character = require("@self/Character")
-	Actions.Input = require("@self/Input")
-	Actions.Gui = require("@self/Gui")
-	Actions.Remote = require("@self/Remote")
-	Actions.Instance = require("@self/Instance")
-	Actions.Log = require("@self/Log")
-	Actions.GameHooks = require("@self/GameHooks")
-	Actions.Lua = require("@self/Lua")
-end
+Actions.Session = require(script.Session)
+Actions.Player = require(script.Player)
+Actions.Character = require(script.Character)
+Actions.Input = require(script.Input)
+Actions.Gui = require(script.Gui)
+Actions.Remote = require(script.Remote)
+Actions.Instance = require(script.Instance)
+Actions.Log = require(script.Log)
+Actions.GameHooks = require(script.GameHooks)
+Actions.Lua = require(script.Lua)
 
 Actions.ORDER = { "Session", "Player", "Character", "Input", "Gui", "Remote", "Instance", "Log" }
 

@@ -6,9 +6,9 @@
 	  service by name (Players, ReplicatedStorage, …) on top of the normal globals.
 ]]
 
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
-local Errors = if script then require(script.Parent.Parent.Errors) else require("../Errors")
-local Json = if script then require(script.Parent.Parent.Json) else require("../Json")
+local Env = require(script.Parent.Parent.Env)
+local Errors = require(script.Parent.Parent.Errors)
+local Json = require(script.Parent.Parent.Json)
 
 local Lua = {}
 

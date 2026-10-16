@@ -2,7 +2,7 @@
 -- log.* conditions. scope "all" is evaluated by the daemon over every node's log events; when a node
 -- receives the step anyway it evaluates over its own capture (same result for single-node sessions).
 
-local Meta = if script then require(script.Parent.Parent.Meta) else require("../Meta")
+local Meta = require(script.Parent.Parent.Meta)
 
 local S = Meta.S
 local ALL = { "edit", "server", "client" }

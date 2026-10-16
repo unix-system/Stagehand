@@ -5,8 +5,8 @@
 	(daemon down, or the localhost permission prompt was declined).
 ]]
 
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
-local Json = if script then require(script.Parent.Parent.Json) else require("../Json")
+local Env = require(script.Parent.Parent.Env)
+local Json = require(script.Parent.Parent.Json)
 
 local Http = {}
 Http.__index = Http

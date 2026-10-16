@@ -1,7 +1,7 @@
 local H = require("./harness")
 local Setup = require("./setup")
-local Node = require("../src/Node")
-local Json = require("../src/Json")
+local Node = H.require(H.src.Node)
+local Json = H.require(H.src.Json)
 local serde = require("@lune/serde")
 local task = require("@lune/task")
 

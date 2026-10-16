@@ -1,5 +1,11 @@
 -- Minimal test harness for Lune (no external deps).
+local Loader = require("../../tools/lib/loader")
+
 local H = { passed = 0, failed = 0, failures = {} }
+
+-- Plugin modules load through the Instance-tree loader: `H.require(H.src.Resolve)`.
+H.src = Loader.src
+H.require = Loader.requireModule
 
 local prefix = {}
 

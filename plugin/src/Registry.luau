@@ -4,9 +4,9 @@
 	stagehand-hooks bridge. Builds the `catalog` command result and the node.ready catalogHash.
 ]]
 
-local Actions = if script then require(script.Parent.Actions) else require("./Actions")
-local Json = if script then require(script.Parent.Json) else require("./Json")
-local sha1 = if script then require(script.Parent.Sha1) else require("./Sha1")
+local Actions = require(script.Parent.Actions)
+local Json = require(script.Parent.Json)
+local sha1 = require(script.Parent.Sha1)
 
 local GameHooks = Actions.GameHooks
 

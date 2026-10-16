@@ -12,7 +12,7 @@
 	and /events are relayed.
 ]]
 
-local Env = if script then require(script.Parent.Parent.Env) else require("../Env")
+local Env = require(script.Parent.Parent.Env)
 
 local Remote = {}
 Remote.__index = Remote
