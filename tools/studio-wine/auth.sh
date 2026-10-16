@@ -11,6 +11,8 @@
 #   auth.sh ticket PLACE_ID UNIVERSE_ID  redeem a one-time rbx-authentication-ticket (read from
 #                                       $STAGEHAND_AUTH_TICKET or stdin) by launching Studio with the
 #                                       same roblox-studio: link the website's "Edit in Studio" uses
+#   auth.sh signin                      press Studio's "Sign in" and print the OAuth URL to open in
+#                                       your browser (anywhere); it ends in a roblox-studio-auth: link
 #   auth.sh link 'roblox-studio-auth:/?code=...'
 #                                       forward Studio's browser-login callback to the running Studio
 #   auth.sh export FILE | import FILE   back up / restore the login (Wine Credential Manager registry
@@ -99,6 +101,21 @@ case "$cmd" in
     watch_login "${STAGEHAND_AUTH_WAIT:-120}" || true
     status || true
     ;;
+  signin)
+    # Press Studio's "Sign in" button on the sign-in page and print the OAuth authorize URL it
+    # wanted to open (recorded by the xdg-open stub). Open that URL in any browser, sign in, then
+    # pass the resulting roblox-studio-auth:/?code=... link to `auth.sh link`.
+    pgrep -f RobloxStudioBeta.exe >/dev/null || { log "Studio is not running"; exit 2; }
+    urls="$STAGEHAND_STUDIO_LOGS/opened-urls.log"; before=$(wc -l < "$urls" 2>/dev/null || echo 0)
+    w=$(xdotool search --name '^Roblox Studio$' | head -1); [ -n "$w" ] || { log "no 'Roblox Studio' window"; exit 2; }
+    eval "$(xdotool getwindowgeometry --shell "$w")"
+    # The "Sign in" button sits at about (32%, 50%) of the sign-in page.
+    xdotool mousemove $((X + WIDTH * 32 / 100)) $((Y + HEIGHT * 50 / 100)) sleep 0.3 click 1
+    for _ in $(seq 1 20); do [ "$(wc -l < "$urls" 2>/dev/null || echo 0)" -gt "$before" ] && break; sleep 0.5; done
+    [ "$(wc -l < "$urls" 2>/dev/null || echo 0)" -gt "$before" ] || { log "Studio did not open a URL; is it on the sign-in page?"; exit 1; }
+    tail -1 "$urls" | cut -d' ' -f2- | grep -q 'oauth/v1/authorize' || { log "unexpected URL: $(tail -1 "$urls")"; exit 1; }
+    tail -1 "$urls" | cut -d' ' -f2-
+    ;;
   link)
     link="${1:?roblox-studio-auth link}"
     case "$link" in roblox-studio-auth:*) ;; *) log "expected a roblox-studio-auth: link"; exit 2;; esac
@@ -106,8 +123,7 @@ case "$cmd" in
     pgrep -f RobloxStudioBeta.exe >/dev/null || log "warning: no Studio running; the link is normally forwarded to the running instance"
     log "forwarding login link to Studio"
     (cd "$d" && nohup wine "$d/RobloxStudioBeta.exe" "$link" >"$STAGEHAND_STUDIO_LOGS/studio-auth-link.log" 2>&1 &)
-    watch_login "${STAGEHAND_AUTH_WAIT:-120}" || true
-    status || true
+    wait_login "${STAGEHAND_AUTH_WAIT:-90}" || { l=$(newest_log); log "recent login lines from $l:"; grep -iE 'login|oauth|external' "$l" | tail -8 | cut -c1-240 >&2; exit 1; }
     ;;
   export)
     out="${1:?FILE}"; wine reg export "$CRED_KEY" "$(wine winepath -w "$(realpath -m "$out")")" /y >/dev/null; chmod 600 "$out"; log "exported to $out (secret)";;
