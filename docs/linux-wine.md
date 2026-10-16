@@ -47,6 +47,16 @@ rewrites them for an existing install. `--fflag KEY=VALUE` adds more.
 ## Signing in
 
 Studio refuses to open even a local place while signed out, and there is no desktop to log in from.
+
+**Roblox ties every sign-in to the IP address of the device that approves it.** Verified 2026-10-16 from a
+cloud container: Quick Log In codes fail on the approving side with "Location doesn't match", and the
+browser OAuth flow (`auth.sh signin` → `auth.sh link`) is received by Studio but the token exchange is
+refused with `invalid_grant: Authorization code may not be used from this device`. So sign in **from a
+browser on the same machine or network as the Wine Studio** (a laptop, or a self-hosted runner you can
+reach with a browser through SSH port-forwarding/VNC once). After that the session is stored in the
+prefix and headless runs need no further interaction; `auth.sh export` moves it to another prefix on the
+same network.
+
 `tools/studio-wine/auth.sh` offers:
 
 1. **Quick sign-in code (easiest).** Start Studio (`run-in-roblox --hold ...` or just

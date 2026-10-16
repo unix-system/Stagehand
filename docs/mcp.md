@@ -285,3 +285,13 @@ Run arbitrary Luau on a node and return its value and captured logs. `actor`, `p
 Tool errors carry a code from [protocol.md](protocol.md#error-object): `RESOLVE_FAILED`, `TIMEOUT`,
 `ASSERTION_FAILED`, `UNKNOWN_ACTION`, `BAD_PARAMS`, `SESSION_ERROR`, `EVAL_DISABLED`, … plus daemon-level
 conditions such as "no Studio attached" (start Studio with the plugin, see [plugin.md](plugin.md)).
+
+## Running playtests without an MCP client
+
+`stagehand-mcp --run <name> [--run <name> ...]` starts the broker, waits for a Studio edit node
+(`--wait-for-studio`, default 300s), runs the named saved playtests one after another exactly like the
+`run_test` tool, prints each report plus a summary table (or one JSON document with `--json`), ends the
+Studio session and exits: `0` all passed, `1` a test failed or errored, `2` setup problem (unknown test,
+no Studio, broker port busy). `--launch-timeout` (default 300s in this mode) and `--timeout` (per-run
+budget) take durations like `90s`. Combine with `tools/run-in-roblox/` to open Studio with the plugin
+installed, see [linux-wine.md](linux-wine.md).

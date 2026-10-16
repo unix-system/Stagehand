@@ -30,7 +30,8 @@ steps:
 4. Optional: expose game-defined `game.*` actions with the `hooks/` package (`StagehandHooks`); the example
    place maps it from `hooks/src` via Rojo.
 5. Try the example: `rojo build examples/place -o StagehandExample.rbxl`, open it in Studio, and point the
-   daemon at `--root examples` to run the playtests in `examples/playtests/`.
+   daemon at `--root examples` to run the playtests in `examples/playtests/`. Without an MCP client:
+   `node packages/mcp/dist/index.js --root examples --run run-mode-smoke` (exit 0/1/2).
 
 ## Repo layout
 
@@ -40,6 +41,8 @@ steps:
 | `plugin/` | Stagehand Studio plugin (Luau, Rojo; Lune tests in `plugin/tests/`) |
 | `hooks/` | `StagehandHooks` package for game-defined `game.*` actions |
 | `tools/` | Lune scripts (`gen-catalog.luau` regenerates/checks `schema/catalog.json`) |
+| `tools/run-in-roblox/` | Fork of `rojo-rbx/run-in-roblox` (Rust) with a Linux/Wine backend and `--hold` mode for driving Studio headlessly |
+| `tools/studio-wine/` | Headless Roblox Studio on Linux: Kombucha Wine bootstrap, Studio installer, Xvfb, sign-in helpers, end-to-end harness |
 | `schema/` | `catalog.json`, `playtest.schema.json` (shared contracts) |
 | `examples/place/` | Sample Rojo place (teams, spawns, gun tool, hook bindings) |
 | `examples/playtests/` | Sample `*.playtest.yaml` files |
@@ -54,5 +57,6 @@ steps:
 - [Broker ↔ node protocol](docs/protocol.md)
 - [Architecture](docs/architecture.md)
 - [Implementation brief](docs/implementation-brief.md)
+- [Studio on Linux/Wine, headless](docs/linux-wine.md)
 
 MIT licensed.

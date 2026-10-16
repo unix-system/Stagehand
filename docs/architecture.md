@@ -336,6 +336,25 @@ dock UI (tests, run button, live log, last result), docs, CI, release workflow p
 
 Record results here (Studio version, OS, date). Gate: if (b) fails, enable `Transport/Remote` + injected client runtime.
 
+### Attempt 1 — Linux (Ubuntu 24.04 cloud container, no GPU), Studio 0.743.0.7431133 under Wine, 2026-10-15/16
+
+Tooling: `tools/studio-wine/` + `tools/run-in-roblox/` (see [linux-wine.md](linux-wine.md)). What was
+established, in order:
+
+- Studio installs from the setup CDN without the Windows installer and **boots, renders and reaches its
+  sign-in page** under VinegarHQ's Kombucha Wine 11.19 + Xvfb + Mesa llvmpipe (OpenGL renderer FFlags).
+  One Wine fix was needed: `XDG_SESSION_TYPE=x11` (Kombucha's winex11 NULL-derefs without it).
+- **Sign-in from a headless box is blocked by Roblox.** Quick Log In codes were rejected with
+  "Location doesn't match"; the browser OAuth flow (`roblox-studio-auth:/?code=…`) reached Studio but the
+  token exchange failed with `invalid_grant: Authorization code may not be used from this device`. Roblox
+  binds the sign-in to the IP of the approving browser, so a Studio whose IP differs from the user's
+  cannot be signed in remotely. Studio will not open a local place while signed out.
+- Consequently items (a)–(f) below are **still open**. They run unchanged on any machine where the
+  browser and Studio share an IP (a developer laptop, or a self-hosted Linux runner you sign in once):
+  `tools/studio-wine/run-examples.sh run-mode-smoke blue-team-gun-hostile two-players-spawn`.
+- `run-in-roblox --hold` + `stagehand-mcp --run` are verified against the fake Studio (178 daemon tests)
+  and the launcher's fake plugin (14 Rust tests); the real-Studio half of the rung could not be exercised.
+
 - [ ] **(a)** Plugin instance runs in the **server** DataModel for `ExecuteRunModeAsync` and `ExecutePlayModeAsync`.
   - Result:
   - Notes:

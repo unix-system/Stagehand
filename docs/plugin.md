@@ -61,6 +61,10 @@ be confirmed by hand in Studio. Record your results in the
 [Phase 0 spike checklist](architecture.md#phase-0-spike-checklist). If client nodes do not load, Stagehand
 falls back to an injected client runtime behind the same protocol.
 
+To drive Studio without a desktop (Linux/Wine, Xvfb) see [linux-wine.md](linux-wine.md):
+`run-in-roblox --hold --place <place> --plugin Stagehand.rbxm` installs the plugin for the run and
+`stagehand-mcp --run <test>` runs playtests from the command line.
+
 ## Troubleshooting
 
 **Daemon not found** (dock shows *disconnected*, `stagehand_status` lists no nodes)
