@@ -1,0 +1,2 @@
+# CI and the Lune parity test compare catalog.json byte-for-byte against generator output (LF).
+schema/catalog.json text eol=lf

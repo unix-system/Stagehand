@@ -65,7 +65,7 @@ describe("MCP surface", () => {
     const c = await connect();
     const saved = JSON.parse(textOf(await c.callTool({ name: "save_test", arguments: { name: "blue-team-gun-hostile", spec: BLUE_TEAM } })));
     expect(saved.saved).toBe(true);
-    expect(saved.file).toMatch(/playtests\/blue-team-gun-hostile\.playtest\.yaml$/);
+    expect(saved.file).toMatch(/playtests[\\/]blue-team-gun-hostile\.playtest\.yaml$/);
     const mismatch = await c.callTool({ name: "save_test", arguments: { name: "other", spec: BLUE_TEAM } });
     expect(mismatch.isError).toBe(true);
     const list = JSON.parse(textOf(await c.callTool({ name: "list_tests", arguments: {} })));
