@@ -317,7 +317,7 @@ node). Response `{ "ack": 103 }`; the node may drop acknowledged events.
 | type | Emitted by | Extra fields |
 |---|---|---|
 | `node.ready` | node, after attach + catalog built | `role`, `catalogHash` (see below) |
-| `session.ready` | server node, after required players joined and characters loaded (or players=0) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order |
+| `session.ready` | server node, after required players joined and their characters loaded, or 8 s after the players joined when the game does not spawn them (menu flows) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order, `charactersLoaded` (boolean; false after the grace period) |
 | `session.ended` | edit node, when `Execute*Async` returns | `sessionId`, `ok` (boolean), `reason` (string) |
 | `segment.started` | node | `runId`, `segmentId` |
 | `segment.finished` | node | `runId`, `segmentId`, `status` |

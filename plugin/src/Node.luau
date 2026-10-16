@@ -25,6 +25,10 @@ Node.PROTOCOL_VERSION = 1
 Node.FLUSH_INTERVAL = 0.05
 Node.MAX_QUEUE = 5000
 Node.SESSION_QUIET = 1.5 -- seconds without PlayerAdded before session.ready when the count is unknown
+-- Seconds to wait for every player's character once the players are in. Games with a menu flow keep
+-- players characterless until they pick a team, so after this session.ready goes out anyway with
+-- charactersLoaded = false and tests use `wait: character.loaded` themselves.
+Node.CHARACTER_GRACE = 8
 
 local TERMINAL = { ["step.passed"] = true, ["step.failed"] = true, ["step.skipped"] = true }
 
@@ -460,6 +464,7 @@ function Node:_scheduleSessionReady()
 			end)
 		end)
 	end
+	local enoughSince = nil
 	self._sessionWatcher = task.spawn(function()
 		while self.running do
 			local list, loaded = self:_playersSnapshot()
@@ -469,15 +474,26 @@ function Node:_scheduleSessionReady()
 			else
 				enough = Env.clock() - lastChange >= Node.SESSION_QUIET
 			end
+			if enough then
+				enoughSince = enoughSince or Env.clock()
+			else
+				enoughSince = nil
+			end
+			local gaveUp = enough and not loaded and Env.clock() - enoughSince >= Node.CHARACTER_GRACE
 			local keys = {}
 			for _, p in ipairs(list) do
 				table.insert(keys, tostring(p.userId))
 			end
 			local key = table.concat(keys, ",")
-			if enough and loaded and self.nodeId and key ~= self._sessionReadyKey then
+			if enough and (loaded or gaveUp) and self.nodeId and key ~= self._sessionReadyKey then
 				self._sessionReadyKey = key
 				self.sessionPlayers = list
-				self:emit({ type = "session.ready", sessionId = self.sessionId, players = list })
+				self:emit({
+					type = "session.ready",
+					sessionId = self.sessionId,
+					players = list,
+					charactersLoaded = loaded,
+				})
 			end
 			task.wait(0.25)
 		end

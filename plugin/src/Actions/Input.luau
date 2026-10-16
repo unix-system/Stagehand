@@ -103,20 +103,20 @@ function Input.keyCode(code: string)
 end
 
 --- Screen-space centre (viewport pixels, inset included) of a GuiObject or BasePart.
+--- AbsolutePosition is measured from below the top bar for every ScreenGui, IgnoreGuiInset or not
+--- (an IgnoreGuiInset full-screen frame reports y = -inset), while VirtualInput takes raw screen
+--- pixels, so the inset is always added. Verified live: the conditional version missed by 58 px.
 function Input.screenPoint(inst)
 	local V2 = Env.datatype("Vector2")
 	if inst:IsA("GuiObject") then
 		local centre = inst.AbsolutePosition + inst.AbsoluteSize / 2
-		local sg = inst:FindFirstAncestorWhichIsA("ScreenGui")
-		if sg and not sg.IgnoreGuiInset then
-			local gs = Env.service("GuiService")
-			if gs then
-				local ok, topLeft = pcall(function()
-					return gs:GetGuiInset()
-				end)
-				if ok and topLeft then
-					centre += topLeft
-				end
+		local gs = if inst:FindFirstAncestorWhichIsA("ScreenGui") then Env.service("GuiService") else nil
+		if gs then
+			local ok, topLeft = pcall(function()
+				return gs:GetGuiInset()
+			end)
+			if ok and topLeft then
+				centre += topLeft
 			end
 		end
 		return V2.new(centre.X, centre.Y)

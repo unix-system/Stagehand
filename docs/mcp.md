@@ -242,7 +242,7 @@ Delete a saved playtest (playtests/<name>.playtest.yaml). Past run reports are k
 
 ### `start_session`
 
-Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded.
+Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded (or 8s after the players joined, for games that spawn characters from a menu; use wait: character.loaded in tests then).
 
 | Arg | Type | Notes |
 |---|---|---|

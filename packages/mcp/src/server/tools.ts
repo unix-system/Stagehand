@@ -480,7 +480,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Start a Studio test session",
       description:
-        "Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded.",
+        "Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded (or 8s after the players joined, for games that spawn characters from a menu; use wait: character.loaded in tests then).",
       inputSchema: {
         mode: z.enum(["run", "play", "multiplayer"]).optional(),
         players: z.number().int().min(0).max(8).optional(),
