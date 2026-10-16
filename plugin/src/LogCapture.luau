@@ -2,7 +2,8 @@
 --[[
 	LogCapture — LogService.MessageOut → `log` events, attributed to the active step.
 	Keeps a bounded buffer for log.* conditions and eval logs. Lines starting with "[Stagehand]"
-	(the plugin's own diagnostics) are kept out of the event stream so they never fail a step.
+	(the plugin's own diagnostics) or "[Roblox][" (CoreScript loggers) are kept out of the event
+	stream so they never fail a step or clutter a report.
 ]]
 
 local Env = require(script.Parent.Env)
@@ -59,9 +60,18 @@ function LogCapture:stop()
 	end
 end
 
+-- Prefixes never attributable to the game: our own diagnostics and Roblox's CoreScript loggers
+-- (e.g. "[Roblox][CorePackages...UIBlox] FoundationProvider not found" with a 20-line stack).
+LogCapture.IGNORED_PREFIXES = { LogCapture.OWN_PREFIX, "[Roblox][" }
+
 function LogCapture:push(message: string, level: string)
-	if type(message) ~= "string" or message:sub(1, #LogCapture.OWN_PREFIX) == LogCapture.OWN_PREFIX then
+	if type(message) ~= "string" then
 		return
+	end
+	for _, prefix in ipairs(LogCapture.IGNORED_PREFIXES) do
+		if message:sub(1, #prefix) == prefix then
+			return
+		end
 	end
 	local entry = { level = level, message = message, t = Env.clock() * 1000, stepId = self.stepId }
 	table.insert(self.entries, entry)

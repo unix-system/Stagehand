@@ -354,6 +354,15 @@ class Compiler {
       }
     }
 
+    // session.wait sleeps by design: budget its duration (plus slack) unless a timeout is given.
+    if (name === "session.wait" && s.timeout === undefined) {
+      try {
+        timeoutMs = Math.max(DEFAULT_STEP_TIMEOUT_MS, parseDuration(params.duration as string | number) + 2_000);
+      } catch {
+        /* $var or invalid: param validation reports it */
+      }
+    }
+
     const save = typeof s.save === "string" ? s.save : null;
     const daemon =
       (verb === "wait" || verb === "expect") && !!name && LOG_CONDITIONS.has(name) && (params.scope ?? "all") === "all";

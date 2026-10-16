@@ -64,6 +64,17 @@ local function loadedState(player)
 		)
 end
 
+-- The stock Health regen script can push a corpse's Health back above 0; the state stays Dead.
+local function isDead(hum): boolean
+	if hum.Health <= 0 then
+		return true
+	end
+	local ok, dead = pcall(function()
+		return hum:GetState() == Enum.HumanoidStateType.Dead
+	end)
+	return ok and dead == true
+end
+
 local function characterSignals(ctx)
 	local player = ctx.player(false)
 	if not player then
@@ -296,14 +307,14 @@ return {
 			kind = "condition",
 			contexts = SC,
 			default = "server",
-			summary = "Character loaded and Humanoid.Health > 0.",
+			summary = "Character loaded, Humanoid.Health > 0 and not in the Dead state.",
 			actor = "required",
 			params = S.params(),
 		}, {
 			run = function(ctx, _p)
 				local ok, hum, why = loadedState(ctx.player(false))
 				local health = hum and hum.Health or nil
-				return ok and health ~= nil and health > 0, { health = health, detail = why }
+				return ok and hum ~= nil and not isDead(hum), { health = health, detail = why }
 			end,
 			signals = characterSignals,
 		}),
@@ -313,7 +324,7 @@ return {
 			kind = "condition",
 			contexts = SC,
 			default = "server",
-			summary = "No character, or Humanoid.Health <= 0.",
+			summary = "No character, Humanoid.Health <= 0, or the Humanoid is in the Dead state.",
 			actor = "required",
 			params = S.params(),
 		}, {
@@ -324,7 +335,7 @@ return {
 				if not hum then
 					return true, { character = char ~= nil }
 				end
-				return hum.Health <= 0, { health = hum.Health }
+				return isDead(hum), { health = hum.Health }
 			end,
 			signals = characterSignals,
 		}),
