@@ -207,8 +207,10 @@ export class NodeRegistry {
       replaced = prev.info.nodeId;
       this.detach(prev.info.nodeId, "replaced by re-attach", "CANCELLED");
     }
-    const orphan =
-      req.role !== "edit" && (req.sessionId == null || this.endedSessions.has(req.sessionId));
+    // A node that reports a session the daemon already ended (e.g. a stale re-attach after 410)
+    // is a plain orphan: it keeps no session id, so it is never counted among that session's nodes.
+    const sessionEnded = req.sessionId != null && this.endedSessions.has(req.sessionId);
+    const orphan = req.role !== "edit" && (req.sessionId == null || sessionEnded);
     if (req.role === "client" && !orphan && req.sessionId) {
       const players = this.sessionPlayers.get(req.sessionId);
       const fromReady = players ? matchPlayer(players, req.userId, req.playerName) : -1;
@@ -221,7 +223,7 @@ export class NodeRegistry {
       role: req.role,
       placeId: req.placeId,
       placeName: req.placeName,
-      sessionId: req.role === "edit" ? null : req.sessionId,
+      sessionId: req.role === "edit" || sessionEnded ? null : req.sessionId,
       playerName: req.playerName,
       userId: req.userId,
       playerIndex: req.role === "client" ? playerIndex : null,
