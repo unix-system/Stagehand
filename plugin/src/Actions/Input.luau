@@ -15,11 +15,134 @@ local Meta = require(script.Parent.Parent.Meta)
 local Env = require(script.Parent.Parent.Env)
 local Errors = require(script.Parent.Parent.Errors)
 local Resolve = require(script.Parent.Parent.Resolve)
+local Conditions = require(script.Parent.Parent.Conditions)
 
 local S = Meta.S
 local C = { "client" }
 
 local Input = {}
+
+-- GUI visibility (shared with Gui.luau) -----------------------------------------------------
+
+--- Returns (visible, reason) for a GuiObject: it and its ancestors Visible/Enabled, under
+--- PlayerGui, non-zero size and on screen.
+function Input.visibility(inst): (boolean, string?)
+	if not inst:IsA("GuiObject") then
+		return false, inst.ClassName .. " is not a GuiObject"
+	end
+	local node = inst
+	while node do
+		if node:IsA("GuiObject") and not node.Visible then
+			return false, node:GetFullName() .. ".Visible = false"
+		end
+		if node:IsA("LayerCollector") then
+			if not node.Enabled then
+				return false, node:GetFullName() .. ".Enabled = false"
+			end
+			break
+		end
+		node = node.Parent
+	end
+	if not node then
+		return false, "not under a ScreenGui/SurfaceGui/BillboardGui"
+	end
+	if node:IsA("ScreenGui") then
+		local pg = node:FindFirstAncestorWhichIsA("PlayerGui")
+		if not pg then
+			return false, "ScreenGui is not under PlayerGui"
+		end
+	end
+	local size = inst.AbsoluteSize
+	if size.X <= 0 or size.Y <= 0 then
+		return false, "zero AbsoluteSize"
+	end
+	local ws = Env.service("Workspace")
+	local cam = ws and ws.CurrentCamera
+	if cam and node:IsA("ScreenGui") then
+		local vp = cam.ViewportSize
+		local p = inst.AbsolutePosition
+		if p.X + size.X < 0 or p.Y + size.Y < 0 or p.X > vp.X or p.Y > vp.Y then
+			return false, "off screen"
+		end
+	end
+	return true, nil
+end
+
+local function ancestorSignals(inst)
+	local list = {}
+	local node = inst
+	while node do
+		if node:IsA("GuiObject") then
+			table.insert(list, node:GetPropertyChangedSignal("Visible"))
+		elseif node:IsA("LayerCollector") then
+			table.insert(list, node:GetPropertyChangedSignal("Enabled"))
+			break
+		end
+		node = node.Parent
+	end
+	table.insert(list, inst.AncestryChanged)
+	table.insert(list, inst:GetPropertyChangedSignal("AbsoluteSize"))
+	table.insert(list, inst:GetPropertyChangedSignal("AbsolutePosition"))
+	return list
+end
+
+--- Signals that may change whether `target` resolves / is visible (plus Text when `withText`).
+function Input.guiSignals(ctx, target, withText: boolean?)
+	local list = {}
+	local ok, inst = pcall(ctx.resolve, target)
+	if ok and inst then
+		for _, s in ipairs(ancestorSignals(inst)) do
+			table.insert(list, s)
+		end
+		if withText then
+			table.insert(list, inst:GetPropertyChangedSignal("Text"))
+		end
+	else
+		local player = ctx.player(false)
+		local pg = player and player:FindFirstChildOfClass("PlayerGui")
+		if pg then
+			table.insert(list, pg.DescendantAdded)
+		end
+	end
+	return list
+end
+
+--- Resolve `target`, waiting for it to appear and (for a GuiObject) become visible. Uses the step
+--- budget minus a margin so the reason ("no match", "Visible = false", "off screen") reaches the
+--- report instead of the runner's "action exceeded timeout". `guiOnly` rejects non-GuiObjects.
+function Input.awaitTarget(ctx, target, guiOnly: boolean?)
+	local budget = math.max(0.25, (tonumber(ctx.budget) or 10) - 0.5)
+	local status, actual, err = Conditions.waitUntil(function()
+		local inst = ctx.resolve(target)
+		if inst:IsA("GuiObject") then
+			local visible, why = Input.visibility(inst)
+			if not visible then
+				return false, { reason = why }
+			end
+		elseif guiOnly then
+			return false, { reason = inst:GetFullName() .. " is not a GuiObject" }
+		end
+		return true, inst
+	end, {
+		timeout = budget,
+		signals = function()
+			return Input.guiSignals(ctx, target, false)
+		end,
+		cancelled = ctx.cancelled,
+		cancelSignal = ctx.cancelSignal,
+	})
+	if status == "cancelled" then
+		Errors.throw("CANCELLED", "cancelled")
+	end
+	if status ~= "passed" then
+		local why = if err
+			then tostring(err.message)
+			elseif type(actual) == "table" and actual.reason then tostring(actual.reason)
+			else "not found"
+		Errors.throw("ACTION_ERROR", string.format("%s not ready after %.1fs: %s", tostring(target), budget, why))
+	end
+	return actual
+end
 
 local cached = nil
 function Input.virtual()
@@ -212,7 +335,7 @@ Input.entries = {
 		kind = "action",
 		contexts = C,
 		default = "client",
-		summary = "Mouse click at a GuiObject's centre / BasePart's screen position, or at a screen position.",
+		summary = "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position.",
 		actor = "required",
 		params = S.params({
 			{ "target", S.selector() },
@@ -223,7 +346,7 @@ Input.entries = {
 		run = function(ctx, p)
 			local pos
 			if p.target then
-				pos = Input.screenPoint(ctx.resolve(p.target))
+				pos = Input.screenPoint(Input.awaitTarget(ctx, p.target, false))
 			else
 				pos = vec2(p.position)
 			end

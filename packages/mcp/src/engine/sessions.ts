@@ -1,5 +1,5 @@
 // Session manager: ensure a Studio test session for {mode, players}, reuse/reset, idle end, end_session.
-import type { NodeRegistry, RegistryEvent } from "../broker/nodes.js";
+import type { NodeInfo, NodeRegistry, RegistryEvent } from "../broker/nodes.js";
 import { type RunSegmentResult, type SessionPlayer, StagehandError, type WireStep } from "../broker/protocol.js";
 import type { NormalizedSession, SessionMode } from "./plan.js";
 
@@ -37,6 +37,8 @@ export interface SessionManagerOptions {
   resetTimeoutMs?: number;
   /** Wait after ending a stray Studio test before launching (default 1000). */
   strayEndSettleMs?: number;
+  /** How long to wait for a stray test's session.ended before launching anyway (default 20000). */
+  strayEndTimeoutMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -56,6 +58,7 @@ export class SessionManager {
   readonly endTimeoutMs: number;
   readonly resetTimeoutMs: number;
   readonly strayEndSettleMs: number;
+  readonly strayEndTimeoutMs: number;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -66,6 +69,7 @@ export class SessionManager {
     this.endTimeoutMs = opts.endTimeoutMs ?? 10_000;
     this.resetTimeoutMs = opts.resetTimeoutMs ?? 30_000;
     this.strayEndSettleMs = opts.strayEndSettleMs ?? 1_000;
+    this.strayEndTimeoutMs = opts.strayEndTimeoutMs ?? 20_000;
     this.unsub = registry.on((e) => this.onRegistry(e));
   }
 
@@ -213,18 +217,24 @@ export class SessionManager {
     };
     this.session = s;
     o.onProgress?.(`launching ${mode} session ${sessionId} with ${cfg.players} player(s)`);
+    let accepted = false;
     try {
-      await this.endStrayTests(edit.placeId, o.signal);
+      await this.endStrayTests(edit, o.signal);
       await this.registry.send(
         edit.nodeId,
         "launch_session",
         { sessionId, mode, players: cfg.players },
         { timeoutMs: 15_000, signal: o.signal },
       );
+      accepted = true;
       await this.waitReady(s, o);
     } catch (e) {
       const err = StagehandError.from(e);
-      await this.end(`launch failed: ${err.message}`).catch(() => {});
+      // Only tear down what Studio actually started. A refused launch (Studio busy with another
+      // daemon's test) must not reach the edit node's end_session, which would stop that test in
+      // Run mode and clear the Stagehand.Session settings the other daemon wrote.
+      if (accepted) await this.end(`launch failed: ${err.message}`).catch(() => {});
+      else this.markEnded(s, `launch refused: ${err.message}`);
       throw err.code === "CANCELLED" ? err : new StagehandError("SESSION_ERROR", `session launch failed: ${err.message}`, err.toObject());
     }
     return { sessionId, mode, players: s.players, placeId: s.placeId, reused: false, record: s };
@@ -235,20 +245,42 @@ export class SessionManager {
    * with "a previous one is still in progress". Any server node of this place attached now belongs to
    * such a test: end it first.
    */
-  private async endStrayTests(placeId: number, signal?: AbortSignal): Promise<void> {
-    const strays = this.registry.list().filter((n) => n.role === "server" && n.placeId === placeId);
+  private async endStrayTests(edit: NodeInfo, signal?: AbortSignal): Promise<void> {
+    const strays = this.registry.list().filter((n) => n.role === "server" && n.placeId === edit.placeId);
     if (strays.length === 0) return;
     this.log(`ending ${strays.length} stray test(s) before launch: ${strays.map((n) => n.nodeId).join(", ")}`);
+    const ids = new Set(strays.map((n) => n.sessionId).filter((s): s is string => typeof s === "string"));
+    // EndTest from the test's own server node is the only thing that ends a Play/multiplayer test:
+    // RunService:Stop() on the edit DataModel is a no-op for them (verified live). Studio takes several
+    // seconds to tear the test down, so wait for the edit node's session.ended (bounded) before launching.
+    const ended = this.waitSessionEnded(ids, this.strayEndTimeoutMs);
     await Promise.all(
-      strays.map(async (n) => {
-        await this.registry
+      strays.map((n) =>
+        this.registry
           .send(n.nodeId, "end_session", { sessionId: n.sessionId }, { timeoutMs: this.endTimeoutMs, signal })
-          .catch(() => {});
-        this.registry.drop(n.nodeId, "stray test ended before launch");
-      }),
+          .catch((e) => this.log(`end_session on stray ${n.nodeId} failed: ${(e as Error).message}`)),
+      ),
     );
-    // ponytail: fixed settle delay for Studio's teardown; poll StudioTestService state if 1s proves flaky
+    for (const n of strays) this.registry.drop(n.nodeId, "stray test ended before launch");
+    await ended;
     await new Promise((r) => setTimeout(r, this.strayEndSettleMs));
+  }
+
+  /** Resolve when the edit node reports session.ended for one of `ids`, or after `timeoutMs`. */
+  private waitSessionEnded(ids: Set<string>, timeoutMs: number): Promise<void> {
+    if (ids.size === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      let off = () => {};
+      const timer = setTimeout(() => done(), timeoutMs);
+      const done = () => {
+        clearTimeout(timer);
+        off();
+        resolve();
+      };
+      off = this.registry.on((e) => {
+        if (e.kind === "event" && e.event.type === "session.ended" && ids.has(String(e.event.sessionId))) done();
+      });
+    });
   }
 
   private readyProblems(s: SessionRecord): string[] {
@@ -373,5 +405,25 @@ export class SessionManager {
     this.markEnded(s, reason);
     this.registry.dropSession(s.sessionId, "session ended");
     return { ended: true, via, sessionId: s.sessionId };
+  }
+
+  /**
+   * Stop whatever test Studio is running even if this daemon did not launch it (another daemon's
+   * session that re-attached here, or one started by hand). Ends our own session first, then sends
+   * `end_session` (EndTest) to every other server node of the place; the edit node's RunService:Stop()
+   * is the last resort and only works for Run mode. A test whose nodes talk to another live daemon
+   * cannot be reached from here: stop it from that daemon or in Studio.
+   */
+  async stopStudio(reason = "stop_session force"): Promise<{ ended: boolean; via: string | null; sessionId: string | null; strays: number }> {
+    const own = await this.end(reason);
+    const edit = this.registry.findEdit();
+    if (!edit) throw new StagehandError("SESSION_ERROR", "no Studio edit node attached");
+    const strays = this.registry.list().filter((n) => n.role === "server" && n.placeId === edit.placeId);
+    if (strays.length > 0) {
+      await this.endStrayTests(edit);
+      return { ended: true, via: "EndTest", sessionId: own.sessionId, strays: strays.length };
+    }
+    const r = (await this.registry.send(edit.nodeId, "end_session", {}, { timeoutMs: this.endTimeoutMs })) as { via?: string };
+    return { ended: own.ended, via: r?.via ?? "RunService.Stop", sessionId: own.sessionId, strays: 0 };
   }
 }

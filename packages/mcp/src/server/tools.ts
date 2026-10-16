@@ -55,7 +55,12 @@ async function awaitRun(run: Run, sink: ProgressSink, extra: ToolExtra): Promise
 
 function nodeHint(d: Daemon): string | undefined {
   if (d.brokerError) return d.brokerError;
-  if (!d.registry.findEdit()) return "No Roblox Studio edit node is attached. Open the place in Studio with the Stagehand plugin installed and enabled (plugin port must match the daemon port).";
+  const edits = d.registry.edits();
+  if (edits.length === 0) return "No Roblox Studio edit node is attached. Open the place in Studio with the Stagehand plugin installed and enabled (the plugin scans ports 38491-38500; set Stagehand.Port if the daemon runs elsewhere).";
+  if (edits.length > 1) {
+    const chosen = edits.find((e) => e.selected);
+    return `${edits.length} Studios are attached; driving "${chosen?.placeName ?? "?"}" (${chosen?.placeId ?? "?"})${d.place ? ` as selected by --place ${d.place}` : " (most recent; start the daemon with --place <id|name> to pin one)"}.`;
+  }
   return undefined;
 }
 
@@ -77,6 +82,8 @@ export function registerTools(server: McpServer, d: Daemon): void {
         broker: { port: d.broker.port, listening: !d.brokerError, error: d.brokerError },
         root: d.root,
         allowEval: d.allowEval,
+        place: d.place,
+        studios: d.registry.edits().map((e) => ({ nodeId: e.nodeId, placeId: e.placeId, placeName: e.placeName, selected: e.selected })),
         nodes: d.broker.health().nodes,
         session: cur
           ? { sessionId: cur.sessionId, mode: cur.mode, players: cur.players, state: cur.state, sessionPlayers: cur.sessionPlayers }
@@ -509,13 +516,19 @@ export function registerTools(server: McpServer, d: Daemon): void {
     "stop_session",
     {
       title: "Stop the Studio test session",
-      description: "End the current Studio test session (EndTest on the server, RunService:Stop via the edit node as fallback). Refused while a run is active; cancel_run first.",
-      inputSchema: {},
+      description:
+        "End the current Studio test session (EndTest on the server; RunService:Stop via the edit node as fallback, which only works for Run mode). Refused while a run is active; cancel_run first. With force: true also ends a test this daemon did not launch but whose server node is attached here (a session left by a restarted daemon); a test driven by another live daemon must be stopped from that daemon or in Studio.",
+      inputSchema: {
+        force: z.boolean().optional().describe("Stop whatever test Studio is running, even one launched by another daemon or by hand"),
+      },
     },
-    async () => {
+    async (a) => {
       if (d.runs.active()) return fail(new StagehandError("SESSION_ERROR", "a run is active; cancel_run first"));
       try {
-        return json(await d.sessions.end("stop_session"));
+        if (a.force) return json(await d.sessions.stopStudio());
+        const r = await d.sessions.end("stop_session");
+        if (!r.ended) return json({ ...r, hint: "no session of this daemon is running; pass force: true to stop a test launched elsewhere" });
+        return json(r);
       } catch (e) {
         return fail(e);
       }

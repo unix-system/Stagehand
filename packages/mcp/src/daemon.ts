@@ -2,7 +2,7 @@
 import path from "node:path";
 import { BrokerServer } from "./broker/http.js";
 import { NodeRegistry, type RegistryOptions } from "./broker/nodes.js";
-import { DEFAULT_PORT } from "./broker/protocol.js";
+import { DEFAULT_PORT, PORT_RANGE } from "./broker/protocol.js";
 import { RunManager } from "./engine/run.js";
 import { SessionManager, type SessionManagerOptions } from "./engine/sessions.js";
 import { Catalog, type CatalogEntry } from "./spec/catalog.js";
@@ -13,6 +13,8 @@ export interface DaemonOptions {
   root: string;
   port?: number;
   host?: string;
+  /** Studio to drive when several are attached: placeId or a case-insensitive substring of the place name. */
+  place?: string;
   allowEval?: boolean;
   registry?: RegistryOptions;
   sessions?: Omit<SessionManagerOptions, "port" | "log">;
@@ -32,6 +34,7 @@ export class Daemon {
   readonly tests: TestsStore;
   readonly runsStore: RunsStore;
   readonly allowEval: boolean;
+  readonly place: string | null;
   brokerError: string | null = null;
   private readonly catalogFetches = new Map<string, Promise<void>>();
   private readonly log: (msg: string) => void;
@@ -43,6 +46,8 @@ export class Daemon {
     this.allowEval = opts.allowEval ?? false;
     this.catalogTimeoutMs = opts.catalogTimeoutMs ?? 5_000;
     this.registry = new NodeRegistry(opts.registry);
+    this.place = opts.place?.trim() || null;
+    this.registry.setPreferredPlace(this.place);
     this.catalog = Catalog.load();
     const port = opts.port ?? DEFAULT_PORT;
     this.sessions = new SessionManager(this.registry, { ...opts.sessions, port, log: this.log });
@@ -81,7 +86,7 @@ export class Daemon {
       return port;
     } catch (e) {
       this.brokerError = (e as NodeJS.ErrnoException).code === "EADDRINUSE"
-        ? `port ${this.broker.port} is already in use (another stagehand-mcp running?); set --port or STAGEHAND_PORT`
+        ? `every port in ${this.broker.port}..${this.broker.port + PORT_RANGE - 1} is in use; set --port or STAGEHAND_PORT to another range`
         : (e as Error).message;
       this.log(`broker failed to start: ${this.brokerError}`);
       throw e;

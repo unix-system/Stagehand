@@ -4,6 +4,8 @@ import { z } from "zod";
 export const PROTOCOL_VERSION = 1;
 export const BROKER_VERSION = "0.1.0";
 export const DEFAULT_PORT = 38491;
+/** The daemon binds the first free port in [port, port + PORT_RANGE); the plugin scans the same range. */
+export const PORT_RANGE = 10;
 export const POLL_TIMEOUT_MS = 25_000;
 export const EVENT_FLUSH_MS = 50;
 export const DAEMON_TIMEOUT_SLACK_MS = 2_000;

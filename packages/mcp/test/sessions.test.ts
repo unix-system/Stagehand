@@ -132,6 +132,9 @@ describe("session manager", () => {
     await h.close();
     h = await startHarness({ launchFails: true });
     await expect(h.daemon.sessions.ensure(cfg(1))).rejects.toMatchObject({ code: "SESSION_ERROR", message: expect.stringMatching(/refused/) });
+    // a refused launch (Studio busy with another daemon's test) must not stop that test via the edit node
+    expect(h.studio.ends).toEqual([]);
+    expect(h.daemon.sessions.current()).toBeNull();
   });
 
   it("edit mode needs only the edit node", async () => {

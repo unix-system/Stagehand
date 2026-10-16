@@ -95,6 +95,7 @@ export class NodeRegistry {
   private nodeCounter = 0;
   private commandCounter = 0;
   private sweeper: NodeJS.Timeout | null = null;
+  private preferredPlace: string | null = null;
 
   constructor(opts: RegistryOptions = {}) {
     this.pollTimeoutMs = opts.pollTimeoutMs ?? POLL_TIMEOUT_MS;
@@ -141,13 +142,38 @@ export class NodeRegistry {
     return this.nodes.has(nodeId);
   }
 
+  /** Studio to prefer when several edit nodes are attached (placeId or place-name substring). */
+  setPreferredPlace(place: string | null): void {
+    this.preferredPlace = place && place.trim() ? place.trim() : null;
+  }
+
+  /** Edit nodes, newest attach first, with the preferred one (see `findEdit`) marked. */
+  edits(): Array<NodeInfo & { selected: boolean }> {
+    const chosen = this.findEdit();
+    return this.list()
+      .filter((n) => n.role === "edit")
+      .reverse()
+      .map((n) => ({ ...n, selected: n.nodeId === chosen?.nodeId }));
+  }
+
+  private matchesPreferredPlace(n: NodeInfo): boolean {
+    const p = this.preferredPlace;
+    if (!p) return false;
+    if (/^\d+$/.test(p) && n.placeId === Number(p)) return true;
+    return (n.placeName ?? "").toLowerCase().includes(p.toLowerCase());
+  }
+
   findEdit(placeId?: number | null): NodeInfo | undefined {
     // Newest attach first: a reloaded plugin gets a new instanceId, and its stale predecessor lingers
-    // until it expires.
+    // until it expires. With several Studios open the preferred place (--place) wins.
     const edits = this.list()
       .filter((n) => n.role === "edit")
       .reverse(); // Map keeps insertion (= attach) order
-    return (placeId != null && edits.find((n) => n.placeId === placeId)) || edits[0];
+    return (
+      (placeId != null && edits.find((n) => n.placeId === placeId)) ||
+      edits.find((n) => this.matchesPreferredPlace(n)) ||
+      edits[0]
+    );
   }
 
   findServer(sessionId: string): NodeInfo | undefined {

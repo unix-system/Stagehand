@@ -28,14 +28,19 @@ last result).
 
 ## HTTP permission prompt
 
-The plugin talks to `http://127.0.0.1:38491` (change with the plugin setting `Stagehand.Port` and the
-daemon's `STAGEHAND_PORT`). The first time it does so, Studio asks whether the plugin may access that
-address. **Allow** it. This permission is per plugin and per address, independent of the game's
-`HttpService.HttpEnabled`, so you do not need to enable HTTP in Game Settings.
+The plugin talks to `http://127.0.0.1:38491`–`38500` (the plugin setting `Stagehand.Port` and the daemon's
+`STAGEHAND_PORT` move the start of that range). The first time it does so, Studio asks whether the plugin
+may access `127.0.0.1`. **Allow** it. This permission is per plugin and per host, independent of the
+game's `HttpService.HttpEnabled`, so you do not need to enable HTTP in Game Settings.
 
 If you denied it by mistake: **Plugins → Manage Plugins → Stagehand → (edit permissions)** and allow
-`127.0.0.1`. Changing the port means a new address and therefore a new prompt. The prompt may appear again
-inside a test session window the first time a server or client node connects; allow it there too.
+`127.0.0.1`. The prompt may appear again inside a test session window the first time a server or client
+node connects; allow it there too.
+
+Several MCP clients (for example two Claude Code sessions) each run their own daemon on the next free port.
+The edit node attaches to all of them, so each client sees every open Studio; a test session's server and
+client nodes talk only to the daemon that launched it. Studio runs one test at a time: a second daemon's
+launch fails with "Studio is already running a test" until the first one ends.
 
 ## How nodes map to DataModels
 

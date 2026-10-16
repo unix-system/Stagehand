@@ -2,7 +2,11 @@
 return {
 	VERSION = "0.1.0",
 	DEFAULT_PORT = 38491,
+	-- The daemon binds the first free port in [port, port + PORT_RANGE); the edit node keeps a node per
+	-- port in that range so every running daemon (one per MCP client) sees this Studio.
+	PORT_RANGE = 10,
 	SETTING_SESSION = "Stagehand.Session",
+	SETTING_SESSION_PORT = "Stagehand.SessionPort",
 	SETTING_PORT = "Stagehand.Port",
 	-- Client nodes relay through the server node over a RemoteFunction (Transport/Remote): in a
 	-- Studio play client HttpService errors "Http requests can only be executed by game server".

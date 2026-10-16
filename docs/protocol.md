@@ -6,7 +6,7 @@ attaches, long-polls for commands, posts results and streams events.
 | Item | Value |
 |---|---|
 | Base URL | `http://127.0.0.1:<port>/v1` |
-| Port | `38491` default; env `STAGEHAND_PORT` (daemon); plugin setting `Stagehand.Port` (node) |
+| Port | range `38491`–`38500`: the daemon binds the first free port in it (`--port` / `STAGEHAND_PORT` move the range start); the edit node attaches to every live daemon in the range (plugin setting `Stagehand.Port` moves its range start); server/client nodes attach only to the daemon that launched them (see "Several daemons and Studios") |
 | Bind | `127.0.0.1` only |
 | Encoding | JSON, UTF-8, `Content-Type: application/json` |
 | `protocolVersion` | `1` (broker rejects a mismatch with `400 BAD_REQUEST`) |
@@ -34,9 +34,31 @@ All non-2xx bodies are `{ "error": ErrorObject }`.
 | `server` | `RunService:IsServer()` and not edit | 1. `StudioTestService:GetTestArgs().stagehand.sessionId`  2. `plugin:GetSetting("Stagehand.Session")`  3. `null` |
 | `client` | `RunService:IsClient()` and not edit | same as server |
 
-The edit node writes `Stagehand.Session` = sessionId **before** calling `Execute*Async` and clears it on
-`end_session`. A server/client node that finds no sessionId still attaches; the broker marks it `orphan`
-and never dispatches steps to it.
+The edit node writes `Stagehand.Session` = sessionId and `Stagehand.SessionPort` = the launching daemon's
+port **before** calling `Execute*Async` and clears them on `end_session`. A server/client node that finds no
+sessionId still attaches; the broker marks it `orphan` and never dispatches steps to it.
+
+## Several daemons and Studios
+
+Every MCP client runs its own daemon, and several Studio windows may be open, so:
+
+- A daemon binds the first free port in `38491`–`38500` and reports it in `stagehand_status` / `health`.
+  Two daemons never share a port; a third-party process on a port is skipped like a daemon.
+- The edit plugin instance keeps one edit **node per port in the range**, each attaching (with the usual
+  backoff) to whatever daemon is there. Every daemon therefore sees every open Studio.
+- A daemon that sees several edit nodes drives the one selected by `--place` / `STAGEHAND_PLACE` (placeId
+  or a case-insensitive substring of the place name), else the most recently attached one; status lists
+  them all so the choice is visible.
+- `launch_session` test args carry the **launching daemon's port**; server/client nodes attach to that
+  port only (fallback: the `Stagehand.SessionPort` setting). Another daemon never sees those nodes, so it
+  cannot end them as strays; Studio runs one test at a time and its `launch_session` fails with
+  `SESSION_ERROR "Studio is already running test session … for the daemon on port N"` while another
+  daemon's session is live (the edit node waits up to 6 s for a stopping test first).
+- A daemon that restarts lands on the same port, so a session it left behind re-attaches to it as a
+  stray; before launching it sends `end_session` (EndTest) to that server node and waits for the edit
+  node's `session.ended` (up to 20 s). `RunService:Stop()` on the edit node only ends Run mode: a
+  Play/multiplayer test lives in its own DataModel and ignores it.
+- `session.ended` is emitted on every edit node of that Studio; daemons ignore sessions they do not own.
 
 ## Attach
 
@@ -171,10 +193,10 @@ widgets until the test stops, and multiplayer clients have windows of their own.
 failed | skipped | cancelled`. `target`: `server | client#N | edit | daemon`; the widget groups its
 per-client summary by it, and a client's widget marks its own `client#<playerIndex>` steps.
 
-`launch_session` on the edit node: write the `Stagehand.Session` setting, then call (in a new thread)
-`ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAsync(args)` for `play`,
+`launch_session` on the edit node: write the `Stagehand.Session` / `Stagehand.SessionPort` settings, then
+call (in a new thread) `ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAsync(args)` for `play`,
 `ExecuteMultiplayerTestAsync(players, args)` for `multiplayer`, with
-`args = { stagehand = { sessionId = …, port = …, mode = …, players = … } }`. The server node reads
+`args = { stagehand = { sessionId = …, port = <port of the daemon that sent the command>, mode = …, players = … } }`. The server node reads
 `players` from `GetTestArgs().stagehand` to know how many players to wait for before `session.ready`
 (Run mode: 0; without test args it emits after 1.5 s without joins). Run mode simulates inside the edit
 DataModel, so the edit plugin instance also hosts that session's server node. When `Execute*Async`

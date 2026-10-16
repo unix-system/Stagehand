@@ -33,8 +33,9 @@ local function label(parent, name: string, order: number, height: number?): Text
 	return l
 end
 
-function Dock.new(plugin: Plugin, node: any, launcher: any, port: number)
-	local self = setmetatable({ node = node, launcher = launcher, port = port, lines = 0 }, Dock)
+--- `nodes`: every edit node of this DataModel (one per daemon port, see init.server.luau).
+function Dock.new(plugin: Plugin, nodes: { any }, launcher: any, basePort: number)
+	local self = setmetatable({ nodes = nodes, launcher = launcher, basePort = basePort, lines = 0 }, Dock)
 
 	local toolbar = plugin:CreateToolbar("Stagehand")
 	local button = toolbar:CreateButton(
@@ -93,12 +94,17 @@ function Dock.new(plugin: Plugin, node: any, launcher: any, port: number)
 	ll.Parent = log
 	self.log = log
 
-	node.statusChanged:Connect(function()
-		self:refresh()
-	end)
-	node.eventEmitted:Connect(function(e)
-		self:onEvent(e)
-	end)
+	for i, node in ipairs(nodes) do
+		node.statusChanged:Connect(function()
+			self:refresh()
+		end)
+		node.eventEmitted:Connect(function(e)
+			-- every node captures the same Output; show log lines from the first one only
+			if e.type ~= "log" or i == 1 then
+				self:onEvent(e, node)
+			end
+		end)
+	end
 	if launcher then
 		launcher.changed:Connect(function()
 			self:refresh()
@@ -143,19 +149,25 @@ function Dock:append(text: string, color: Color3?)
 end
 
 function Dock:refresh()
-	local node = self.node
-	local s = node.state
-	if s == "attached" then
-		self.status.Text = "Daemon: connected as " .. tostring(node.nodeId) .. " · 127.0.0.1:" .. self.port
+	local attached = {}
+	local stopped = 0
+	for _, node in ipairs(self.nodes) do
+		if node.state == "attached" then
+			table.insert(attached, ":" .. tostring(node.transport.port) .. " (" .. tostring(node.nodeId) .. ")")
+		elseif node.state == "stopped" then
+			stopped += 1
+		end
+	end
+	local range = ":" .. self.basePort .. "–:" .. (self.basePort + #self.nodes - 1)
+	if #attached > 0 then
+		self.status.Text = "Daemons: " .. table.concat(attached, ", ")
 		self.status.TextColor3 = Color3.fromRGB(90, 200, 120)
-	elseif s == "connecting" then
-		self.status.Text = "Daemon: connecting to 127.0.0.1:"
-			.. self.port
-			.. (if node.lastError then " (" .. tostring(node.lastError) .. ")" else "")
-		self.status.TextColor3 = Color3.fromRGB(230, 180, 60)
-	else
-		self.status.Text = "Daemon: " .. tostring(s)
+	elseif stopped == #self.nodes then
+		self.status.Text = "Daemons: stopped"
 		self.status.TextColor3 = Color3.fromRGB(200, 90, 90)
+	else
+		self.status.Text = "Daemons: none yet · scanning 127.0.0.1" .. range
+		self.status.TextColor3 = Color3.fromRGB(230, 180, 60)
 	end
 	local l = self.launcher
 	if l and l.current then
@@ -184,7 +196,7 @@ local COLORS = {
 	error = Color3.fromRGB(230, 90, 90),
 }
 
-function Dock:onEvent(e)
+function Dock:onEvent(e, node)
 	local t = e.type
 	if t == "segment.started" then
 		self.current.Text = "Running " .. tostring(e.segmentId) .. " of " .. tostring(e.runId)
@@ -208,7 +220,7 @@ function Dock:onEvent(e)
 	elseif t == "log" then
 		self:append(e.message, COLORS[e.level])
 	elseif t == "node.ready" then
-		self:append("attached as " .. tostring(self.node.nodeId))
+		self:append("attached to :" .. tostring(node.transport.port) .. " as " .. tostring(node.nodeId))
 	end
 end
 

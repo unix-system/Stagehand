@@ -125,6 +125,34 @@ describe("Node", function()
 		eq(#tr.events[1].catalogHash, 40)
 	end)
 
+	it("launch_session passes the node's own daemon port and transport to the launcher", function()
+		Setup.world()
+		local tr = fakeTransport()
+		tr.port = 38493
+		tr.commands =
+			{ { id = "c_1", type = "launch_session", params = { sessionId = "s_9", mode = "play", players = 1 } } }
+		local got = nil
+		local launcher = {
+			launch = function(_self, params, port, transport)
+				got = { params = params, port = port, transport = transport }
+				return { accepted = true }
+			end,
+		}
+		local node = Node.new({ role = "edit", transport = tr, version = "0.1.0", launcher = launcher })
+		node:start()
+		truthy(
+			waitFor(function()
+				return #tr.results >= 1
+			end, 2),
+			"launch result"
+		)
+		node:stop()
+		eq(tr.results[1].ok, true)
+		eq(got.params.sessionId, "s_9")
+		eq(got.port, 38493)
+		eq(got.transport, tr)
+	end)
+
 	-- Fake Players service: the Lune stub has no GetPlayers/PlayerAdded.
 	local function fakePlayers(list)
 		local signal = {

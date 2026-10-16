@@ -1,8 +1,10 @@
 # MCP server (`stagehand-mcp`)
 
 `stagehand-mcp` is a stdio MCP server that also runs the HTTP broker the Studio plugin connects to
-(`127.0.0.1:38491`, override with `STAGEHAND_PORT`). One daemon serves one Studio instance. Tool names come
-from [architecture.md](architecture.md#mcp-surface-packagesmcpsrcserver).
+(the first free port in `127.0.0.1:38491`–`38500`; `STAGEHAND_PORT` moves the range start). Several MCP
+clients can run their own daemons at once, each sees every open Studio, and `--place` picks which Studio a
+daemon drives when more than one is open. Tool names come from
+[architecture.md](architecture.md#mcp-surface-packagesmcpsrcserver).
 
 > The tool reference below is generated from `packages/mcp/src/server/tools.ts`. When in doubt, trust the
 > tool's own input schema as listed by your MCP client.
@@ -54,7 +56,8 @@ relative to the project root (`--root <dir>`, default the daemon's working direc
 | Flag | Meaning |
 |---|---|
 | `--root <dir>` | project dir (tests in `<root>/playtests`, runs in `<root>/.stagehand/runs`; default cwd) |
-| `--port <n>` | broker port (default `$STAGEHAND_PORT` or 38491) |
+| `--port <n>` | start of the broker port range (default `$STAGEHAND_PORT` or 38491); the first free port in `n`..`n+9` is used |
+| `--place <id\|name>` | Studio to drive when several are open: a placeId or a case-insensitive substring of the place name (default `$STAGEHAND_PLACE`, else the most recently attached Studio) |
 | `--allow-eval` | enable the `eval_lua` tool |
 | `--idle-timeout <dur>` | end idle Studio sessions after this long (default 120s; 0 = never) |
 | `--broker-only` | run only the HTTP broker (no MCP stdio), for debugging |
@@ -252,9 +255,11 @@ Start (or reuse) a Studio test session so later runs and inspect calls are fast:
 
 ### `stop_session`
 
-End the current Studio test session (EndTest on the server, RunService:Stop via the edit node as fallback). Refused while a run is active; cancel_run first.
+End the current Studio test session (EndTest on the server; RunService:Stop via the edit node as fallback, which only works for Run mode). Refused while a run is active; cancel_run first. With force: true also ends a test this daemon did not launch but whose server node is attached here (a session left by a restarted daemon); a test driven by another live daemon must be stopped from that daemon or in Studio.
 
-No arguments.
+| Argument | Type | Notes |
+|---|---|---|
+| `force`? | boolean | Stop whatever test Studio is running, even one launched by another daemon or by hand |
 
 ### `eval_lua`
 

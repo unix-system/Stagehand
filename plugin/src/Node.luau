@@ -50,6 +50,10 @@ function Node.new(opts: { [string]: any })
 		version = opts.version or "0.1.0",
 		logCapture = opts.logCapture,
 		launcher = opts.launcher,
+		-- Studio-only UI shared between the nodes of one DataModel ({ progressUI }); a node given no
+		-- shared table owns its own and destroys it on stop.
+		ui = opts.ui or {},
+		_ownsUi = opts.ui == nil,
 		registry = opts.registry or Registry.new(opts.role),
 		nodeId = nil,
 		-- re-attach key; placeId alone collides across unpublished places (all 0)
@@ -334,9 +338,9 @@ function Node:stop()
 	if self.logCapture then
 		self.logCapture:stop()
 	end
-	if self.progressUI then
-		self.progressUI:destroy()
-		self.progressUI = nil
+	if self._ownsUi and self.ui.progressUI then
+		self.ui.progressUI:destroy()
+		self.ui.progressUI = nil
 	end
 	self:_setState("stopped", nil)
 end
@@ -515,11 +519,13 @@ function handlers.progress(self, params)
 	-- Every client shows its own widget: multiplayer clients have their own windows, and in Play solo
 	-- the main window displays the play DataModel, which hides the edit node's widgets until the test
 	-- stops (verified live: the edit widget was Enabled but invisible).
-	if not self.progressUI then
+	-- `ui` is shared by all nodes of a DataModel (one per daemon): the widget id must stay unique.
+	local ui = self.ui
+	if not ui.progressUI then
 		-- required lazily: Studio-only widget code
-		self.progressUI = require(script.Parent.UI.Progress).new(self.plugin)
+		ui.progressUI = require(script.Parent.UI.Progress).new(self.plugin)
 	end
-	self.progressUI:update(params, if self.role == "client" then "client#" .. tostring(self.playerIndex) else nil)
+	ui.progressUI:update(params, if self.role == "client" then "client#" .. tostring(self.playerIndex) else nil)
 	return Json.object({})
 end
 
@@ -577,7 +583,8 @@ function handlers.launch_session(self, params)
 	if self.role ~= "edit" or not self.launcher then
 		Errors.throw("UNKNOWN_COMMAND", "launch_session is only supported by the edit node")
 	end
-	return self.launcher:launch(params or {})
+	-- The session's nodes must attach to the daemon that asked, i.e. this node's port.
+	return self.launcher:launch(params or {}, self.transport.port, self.transport)
 end
 
 function handlers.end_session(self, params)

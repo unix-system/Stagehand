@@ -713,7 +713,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Mouse click at a GuiObject's centre / BasePart's screen position, or at a screen position.",
+      "summary": "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position.",
       "actor": "required",
       "params": {
         "type": "object",
@@ -879,7 +879,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Activate a GuiButton (fires Activated via VirtualInput click at its centre).",
+      "summary": "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre.",
       "actor": "required",
       "params": {
         "type": "object",
@@ -902,7 +902,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Set a TextBox's Text and fire FocusLost(enterPressed=true).",
+      "summary": "Wait for a TextBox to appear and be visible, set its Text and fire FocusLost(enterPressed=true).",
       "actor": "required",
       "params": {
         "type": "object",
