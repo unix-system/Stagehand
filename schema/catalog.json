@@ -545,7 +545,7 @@
         "client"
       ],
       "default": "server",
-      "summary": "Character loaded and Humanoid.Health > 0.",
+      "summary": "Character loaded, Humanoid.Health > 0 and not in the Dead state.",
       "actor": "required",
       "params": {
         "type": "object",
@@ -562,7 +562,7 @@
         "client"
       ],
       "default": "server",
-      "summary": "No character, or Humanoid.Health <= 0.",
+      "summary": "No character, Humanoid.Health <= 0, or the Humanoid is in the Dead state.",
       "actor": "required",
       "params": {
         "type": "object",

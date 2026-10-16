@@ -59,6 +59,9 @@ local function main()
 			sessionId = nil
 		end
 	end
+	if role ~= "edit" then
+		print(`[Stagehand] {role} node starting (session {sessionId or "none"})`)
+	end
 	local port = tonumber(args and args.port) or tonumber(getSetting(Config.SETTING_PORT)) or Config.DEFAULT_PORT
 	local http = Http.new(port)
 
@@ -117,6 +120,7 @@ local function main()
 		transport = transport,
 		sessionId = sessionId,
 		expectedPlayers = args and tonumber(args.players) or nil,
+		mode = args and args.mode or nil,
 		version = Config.VERSION,
 		logCapture = LogCapture.new(),
 		launcher = launcher,

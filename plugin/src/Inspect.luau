@@ -9,6 +9,24 @@ local Serialize = require(script.Parent.Serialize)
 
 local Inspect = {}
 
+-- Selector path (not GetFullName): names with . [ ] need quoting to resolve.
+local function selectorPath(inst): string
+	local parts = {}
+	local g = Env.game()
+	local cur = inst
+	while cur and cur ~= g do
+		local name = cur.Name
+		table.insert(parts, 1, if name:find("[%.%[%]]") then "'" .. name .. "'" else name)
+		cur = cur.Parent
+	end
+	return table.concat(parts, ".")
+end
+
+-- Internal Studio objects (e.g. FilteredSelection) report an empty ClassName; nothing can target them.
+local function hidden(inst): boolean
+	return inst.ClassName == ""
+end
+
 local function describe(inst, depth: number, budget: { n: number, truncated: boolean }): any
 	budget.n -= 1
 	local attrs = {}
@@ -23,9 +41,7 @@ local function describe(inst, depth: number, budget: { n: number, truncated: boo
 	local okT, tags = pcall(function()
 		return inst:GetTags()
 	end)
-	local okP, path = pcall(function()
-		return inst:GetFullName()
-	end)
+	local okP, path = pcall(selectorPath, inst)
 	local node = {
 		path = if okP then path else inst.Name,
 		className = inst.ClassName,
@@ -43,7 +59,9 @@ local function describe(inst, depth: number, budget: { n: number, truncated: boo
 				budget.truncated = true
 				break
 			end
-			table.insert(children, describe(c, depth - 1, budget))
+			if not hidden(c) then
+				table.insert(children, describe(c, depth - 1, budget))
+			end
 		end
 		node.children = children
 	end

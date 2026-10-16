@@ -9,6 +9,7 @@ export interface FakeNodeOptions {
   playerName?: string | null;
   userId?: number | null;
   protocolVersion?: number;
+  instanceId?: string;
   handlers?: Record<string, Handler>;
   /** Do not post results automatically (tests drive /v1/result themselves). */
   manual?: boolean;
@@ -57,6 +58,7 @@ export class FakeNode {
       playerIndex: null,
       pluginVersion: "0.1.0",
       transport: "http",
+      ...(o.instanceId ? { instanceId: o.instanceId } : {}),
     };
   }
 

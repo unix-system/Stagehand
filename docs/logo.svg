@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 224" role="img" aria-label="Stagehand">
+  <!-- overhead spotlight -->
+  <rect x="97" y="0" width="6" height="10" fill="#2B2740"/>
+  <polygon points="80,8 120,8 128,32 72,32" fill="#2B2740"/>
+  <polygon points="78,32 122,32 192,204 8,204" fill="#FFD166"/>
+  <ellipse cx="100" cy="204" rx="92" ry="18" fill="#F4B942"/>
+  <ellipse cx="100" cy="204" rx="34" ry="8" fill="#D9A035"/>
+  <!-- the part under test: true isometric cube, edge 42; base hexagon hides face seams -->
+  <polygon points="100,106 136.37,127 136.37,169 100,190 63.63,169 63.63,127" fill="#D7263D"/>
+  <polygon points="100,106 136.37,127 100,148 63.63,127" fill="#E8405A"/>
+  <polygon points="100,148 136.37,127 136.37,169 100,190" fill="#A61B2E"/>
+</svg>

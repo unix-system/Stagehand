@@ -26,7 +26,7 @@ export async function startHarness(
     port: 0,
     log: () => {},
     registry: { pollTimeoutMs: 300, expiryMs: 500, sweepMs: 50 },
-    sessions: { launchTimeoutMs: daemonOpts.launchTimeoutMs ?? 3000, idleTimeoutMs: daemonOpts.idleTimeoutMs ?? 0, endTimeoutMs: 1000 },
+    sessions: { launchTimeoutMs: daemonOpts.launchTimeoutMs ?? 3000, idleTimeoutMs: daemonOpts.idleTimeoutMs ?? 0, endTimeoutMs: 1000, strayEndSettleMs: 0 },
     settleMs: 40,
     cancelGraceMs: 500,
     catalogTimeoutMs: 1000,

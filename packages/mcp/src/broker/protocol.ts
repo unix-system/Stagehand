@@ -74,6 +74,7 @@ export const attachRequestSchema = z.object({
   playerIndex: z.null().optional(),
   pluginVersion: z.string(),
   transport: z.enum(["http", "remote"]).optional().default("http"),
+  instanceId: z.string().nullable().optional().transform((v) => v ?? null),
 });
 export type AttachRequest = z.infer<typeof attachRequestSchema>;
 
@@ -134,7 +135,8 @@ export type CommandType =
   | "launch_session"
   | "end_session"
   | "add_players"
-  | "ping";
+  | "ping"
+  | "progress";
 
 export interface Command {
   id: string;

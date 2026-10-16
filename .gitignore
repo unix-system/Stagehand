@@ -5,3 +5,4 @@ coverage/
 .stagehand/runs/
 plugin/build/*.rbxm
 .DS_Store
+*.bak

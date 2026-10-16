@@ -69,7 +69,25 @@ function Lua.compile(code: string, env: { [string]: any }): (...any) -> ...any
 	if not ls then
 		Errors.throw("LUA_ERROR", "loadstring is not available in this context")
 	end
-	local fn, err = ls(code, "=stagehand")
+	local okLs, fn, err = pcall(ls, code, "=stagehand")
+	if not okLs and tostring(fn):find("not available", 1, true) then
+		-- Play DataModels block loadstring (LoadStringEnabled is not writable at runtime): compile
+		-- through a throwaway ModuleScript instead.
+		okLs, fn = pcall(function()
+			local m = Instance.new("ModuleScript")
+			m.Name = "StagehandLua"
+			m.Source = "return function(...)\n" .. code .. "\nend"
+			local okReq, f = pcall(require, m)
+			m:Destroy()
+			if not okReq then
+				error("compile error: " .. tostring(f), 0)
+			end
+			return f
+		end)
+	end
+	if not okLs then
+		Errors.throw("LUA_ERROR", tostring(fn))
+	end
 	if not fn then
 		Errors.throw("LUA_ERROR", "compile error: " .. tostring(err))
 	end

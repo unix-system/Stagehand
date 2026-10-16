@@ -77,6 +77,14 @@ describe("routing for every catalog default context", () => {
     }
   });
 
+  it("session.wait budgets its own duration unless a timeout is given", () => {
+    const step = (extra: Record<string, unknown>) =>
+      compileOne({ do: "session.wait", duration: "20s", ...extra }, { players: 1 }).plan!.allSteps[0]!.timeoutMs;
+    expect(step({})).toBe(22_000);
+    expect(step({ timeout: "5s" })).toBe(5_000);
+    expect(compileOne({ do: "session.wait", duration: "1s" }, { players: 1 }).plan!.allSteps[0]!.timeoutMs).toBe(10_000);
+  });
+
   it("client steps pick the actor's client node", () => {
     const res = compileOne({ do: "input.key", as: "p2", code: "Space" }, { players: 2 });
     expect(res.plan!.allSteps[0]!.target).toEqual({ role: "client", playerIndex: 2 });

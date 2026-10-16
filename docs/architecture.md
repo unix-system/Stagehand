@@ -167,8 +167,9 @@ edit node before launch, as the official plugin did for its stop flag).
 
 Commands: `run_segment`, `cancel`, `catalog`, `inspect`, `eval`, `launch_session` (edit), `end_session`
 (server → `EndTest`; edit fallback → `RunService:Stop()`), `add_players` (server), `ping`.
-`Transport/Http.luau` is the default; `Transport/Remote.luau` (RemoteEvent relay through the server node) is
-the fallback for an injected client runtime if Phase 0 shows plugins do not load in simulated clients.
+Edit and server nodes use `Transport/Http.luau`. Client nodes use `Transport/Remote.luau` (RemoteFunction
+relay through the server node): in a Studio play client, HttpService errors "Http requests can only be
+executed by game server" even from plugin code.
 
 ## Catalog (initial actions & conditions)
 

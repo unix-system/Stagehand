@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" alt="Stagehand" width="160"></p>
+
 # Stagehand
 
 Declarative, agent-driven playtests for Roblox Studio. Write a playtest as a short YAML list of

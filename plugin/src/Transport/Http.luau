@@ -26,7 +26,9 @@ function Http:request(method: string, path: string, body: any?): (number, any, s
 		Method = method,
 		Headers = { ["Content-Type"] = "application/json" },
 	}
-	if body ~= nil then
+	if type(body) == "string" then
+		req.Body = body -- pre-encoded (relayed from a client node)
+	elseif body ~= nil then
 		req.Body = Json.encode(body)
 	end
 	local ok, res = pcall(function()

@@ -25,6 +25,7 @@ import {
   stepsOf,
   targetKey,
 } from "./plan.js";
+import { pushProgress } from "./progress.js";
 import { Reporter } from "./reporter.js";
 import type { SessionHandle, SessionManager } from "./sessions.js";
 import type { FailureInfo, LogRecord, RunEvent, RunResult, RunStatus, StepRecord } from "./types.js";
@@ -80,6 +81,7 @@ export class RunManager {
       void run.finishInvalid();
       return run;
     }
+    pushProgress(run, this.deps.registry);
     const exec = this.lock.then(async () => {
       this.current = run;
       try {

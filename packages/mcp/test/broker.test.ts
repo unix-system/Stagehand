@@ -47,6 +47,21 @@ describe("broker over HTTP", () => {
     expect(((await raw.json()) as any).error.code).toBe("BAD_REQUEST");
   });
 
+  it("two edit nodes with placeId 0 but distinct instanceIds do not evict each other", async () => {
+    const a = node({ role: "edit", placeId: 0, instanceId: "a" });
+    const b = node({ role: "edit", placeId: 0, instanceId: "b" });
+    await a.attach();
+    await b.attach();
+    expect(registry.list().map((n) => n.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
+    const again = node({ role: "edit", placeId: 0, instanceId: "a" });
+    await again.attach();
+    expect(registry.list().map((n) => n.nodeId).sort()).toEqual([again.nodeId, b.nodeId].sort());
+    // a reloaded plugin (new instanceId) wins over its not-yet-expired predecessor
+    const reloaded = node({ role: "edit", placeId: 0, instanceId: "c" });
+    await reloaded.attach();
+    expect(registry.findEdit(0)?.nodeId).toBe(reloaded.nodeId);
+  });
+
   it("long-poll returns 204 after the poll timeout", async () => {
     const n = node({ role: "edit" });
     await n.attach();
