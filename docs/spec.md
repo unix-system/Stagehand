@@ -19,6 +19,7 @@ A playtest is a YAML (canonical) or JSON file `playtests/<name>.playtest.yaml`, 
 | `failOnError` | boolean | `true` | any `error`-level Output on any node fails the active step |
 | `actors` | map name → `{ player: 1..8 }` | `p1..pN` | extra aliases; `p1..pN` always exist |
 | `vars` | map name → value | `{}` | referenced as `$name` |
+| `fragments` | map name → step[] | `{}` | named step lists for `use:` steps; shadow shared fragments of the same name (see [Fragments](#fragments)) |
 | `setup` | step[] | `[]` | once per session when reused, every run otherwise |
 | `steps` | step[] (≥1) | **required** | |
 | `teardown` | step[] | `[]` | always runs, even after failure or cancel |
@@ -49,9 +50,12 @@ other key is a param of the named action/condition (flat form).
 | `lua` | string, or `{ code, returns? }` | escape hatch action, runs on the resolved node with `actor, player, character, vars` in scope; return value can be `save`d |
 | `parallel` | array of branches; a branch is a step list or a single step | branches run concurrently, then join; first non-soft failure cancels the others |
 | `each` | `{ actors: [names] \| "all", steps: [...] }` | run `steps` once per actor with `as` bound (sequentially, in listed order) |
+| `use` | fragment name | splice in a named step list (`fragments:` in this file, else `playtests/_shared/<name>.fragment.yaml`); modifiers: `as` (actor for steps that name none), `vars` (map substituted into the fragment's steps), `soft`, `label`, `if` |
 
 A condition written in Lua uses the condition form: `{ wait: lua, code: "return workspace:GetAttribute('Ready')" }`
-or `{ expect: lua, code: "…" }` (truthy return = true). A bare `lua:` step is always an action.
+or `{ expect: lua, code: "…" }` (truthy return = true). A bare `lua:` step is always an action. Give every
+Lua step a `label`: without one it is displayed as `lua: <code…>` and validation warns, because
+`"lua lua as p1"` tells a reader nothing.
 
 ### Modifiers
 
@@ -62,13 +66,38 @@ or `{ expect: lua, code: "…" }` (truthy return = true). A bare `lua:` step is 
 | `timeout` | duration | do/wait/expect/lua | default `10s`; for `expect` only used with `within` as upper bound |
 | `within` | duration | expect | wait-then-assert window; absent = instant |
 | `soft` | boolean | all | failure is recorded, run continues |
-| `label` | string | all | display name in reports |
-| `save` | var name | do/lua | store the return value in `vars[save]` |
+| `label` | string | all | display name in reports and the Studio progress widget; recommended for every `lua` step |
+| `save` | var name | do/lua | store the return value in `vars[save]`; vars are run-wide, so a `save` inside `each` is overwritten by every later actor (the last one wins) — read it inside the same iteration or use distinct names |
 | `if` | `"$var"` | all | skip (reported `step.skipped`, reason `if`) when the var is falsy (`nil`, `false`, `0`, `""`) |
-| `with` | map | do/wait/expect | params, merged over flat params; use for params whose names collide with modifiers |
+| `with` | map | do/wait/expect | params, merged over flat params; **required** for a param whose name is a modifier (`label`, `timeout`, `as`, …), which would otherwise be read as the modifier |
 
 Actions that need a time budget (e.g. `character.moveTo`) use the step `timeout`; there is no separate
-`timeout` param.
+`timeout` param. A `lua` step's return value (and any action's non-nil return) is reported in the run's
+step table even without `save`; `save` additionally stores it for later `$name` references.
+
+### Fragments
+
+A fragment is a named step list reused by `use:` steps. Define it in the playtest under `fragments:`, or
+share it with every test in the folder as `playtests/_shared/<name>.fragment.yaml`
+(`{ name, description?, steps }`; the name must match the file name and be kebab-case). A fragment in the
+file shadows a shared one of the same name. Fragments may themselves contain `use:` steps (nesting limit 8;
+a fragment that uses itself is an error).
+
+```yaml
+fragments:
+  spawn-via-menu:
+    - { do: gui.click, target: "@p1.gui.Menu.Play" }      # `as` comes from the use step
+    - { wait: player.onTeam, team: $team, timeout: 30s }
+steps:
+  - { use: spawn-via-menu, as: p1, vars: { team: Blue } }
+  - { use: spawn-via-menu, as: p2, vars: { team: Red }, soft: true }
+```
+
+Expansion happens at compile time: the fragment's steps get ids `steps.N.use.<name>.i`, inherit `as`
+(for steps that name no actor) and `soft` from the use step, and `vars` on the use step are substituted
+into them first (whole-value `$name` references, like top-level `vars`). `if` on a use step skips the whole
+expansion. Selectors inside a fragment that hard-code an actor (`@p1.gui…`) are not rewritten; write
+`@<actor>` only when the fragment is meant for that player.
 
 ### Context resolution
 

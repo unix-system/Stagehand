@@ -355,6 +355,9 @@ Record results here (Studio version, OS, date). Gate: if (b) fails, enable `Tran
 - [ ] **(f)** `EndTest` from the server node ends all windows; launch latency measured.
   - Result:
   - Notes:
+- [ ] **(g)** Input overlay (`StagehandInput` ScreenGui in CoreGui, docs/plugin.md "Input visualisation") visible in each client window; `VirtualInput` clicks through it without a CoreGui error.
+  - Result:
+  - Notes:
 
 | Topology | Launch → all nodes attached (ms) | EndTest → torn down (ms) |
 |---|---|---|

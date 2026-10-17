@@ -3,6 +3,21 @@ import type { NodeInfo, NodeRegistry, RegistryEvent } from "../broker/nodes.js";
 import { type RunSegmentResult, type SessionPlayer, StagehandError, type WireStep } from "../broker/protocol.js";
 import type { NormalizedSession, SessionMode } from "./plan.js";
 
+/**
+ * Human-readable cause for a `session.ended` event the daemon did not ask for: the edit node reports what
+ * Execute*Async returned (the EndTest argument, if the game or a tool ended the test) and how long the
+ * test lived, so a run that dies mid-way can say more than "ended in Studio".
+ */
+export function describeSessionEnd(ev: Record<string, unknown>): string {
+  const base = typeof ev.reason === "string" && ev.reason ? ev.reason : "ended in Studio";
+  const parts: string[] = [];
+  if (typeof ev.elapsedMs === "number") parts.push(`after ${Math.round(ev.elapsedMs / 1000)}s`);
+  if (typeof ev.result === "string" && ev.result && ev.result !== "nil") parts.push(`Execute*Async returned ${JSON.stringify(ev.result)}`);
+  const tail = parts.length ? ` (${parts.join("; ")})` : "";
+  const who = ev.ok === false ? "" : ": the test was ended outside this daemon (Stop in Studio, EndTest from the game or another tool, or the test windows were closed)";
+  return `${base}${tail}${who}`;
+}
+
 export type SessionState = "launching" | "ready" | "resetting" | "ending" | "ended";
 
 export interface SessionRecord {
@@ -39,7 +54,25 @@ export interface SessionManagerOptions {
   strayEndSettleMs?: number;
   /** How long to wait for a stray test's session.ended before launching anyway (default 20000). */
   strayEndTimeoutMs?: number;
+  /** How long end() waits for Studio to confirm the test ended (session.ended) before returning (default 20000). */
+  sessionEndWaitMs?: number;
   log?: (msg: string) => void;
+}
+
+export interface EndResult {
+  /** The test was ended (EndTest sent, or RunService.Stop for Run mode). */
+  ended: boolean;
+  via: string | null;
+  sessionId: string | null;
+  /** Studio confirmed the teardown (session.ended from the edit node) before this returned. */
+  studioStopped: boolean;
+  hint?: string;
+}
+
+/** What the shared Studio Launcher reports (launcher_status command). */
+export interface LauncherStatus {
+  current: { sessionId: string; mode: string; players: number; port: number; startedAt?: number } | null;
+  last: { sessionId: string; ok: boolean; result?: string; endedAt?: number; elapsedMs?: number } | null;
 }
 
 export interface EnsureOptions {
@@ -59,6 +92,7 @@ export class SessionManager {
   readonly resetTimeoutMs: number;
   readonly strayEndSettleMs: number;
   readonly strayEndTimeoutMs: number;
+  readonly sessionEndWaitMs: number;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -70,7 +104,48 @@ export class SessionManager {
     this.resetTimeoutMs = opts.resetTimeoutMs ?? 30_000;
     this.strayEndSettleMs = opts.strayEndSettleMs ?? 1_000;
     this.strayEndTimeoutMs = opts.strayEndTimeoutMs ?? 20_000;
+    this.sessionEndWaitMs = opts.sessionEndWaitMs ?? 20_000;
     this.unsub = registry.on((e) => this.onRegistry(e));
+  }
+
+  /** The daemon's own broker port (names the owner of a Studio test in Launcher messages). */
+  get port(): number {
+    return this.opts.port;
+  }
+
+  /** Record the port the broker actually bound (it may differ from the requested one, e.g. 0 or a range). */
+  setPort(port: number): void {
+    this.opts.port = port;
+  }
+
+  /** Session ids this daemon launched and has since ended. */
+  endedIds(): Set<string> {
+    return new Set(this.ended.map((s) => s.sessionId));
+  }
+
+  /** Ask the edit node what the shared Launcher is running (null when no edit node / old plugin). */
+  async launcherStatus(): Promise<LauncherStatus | null> {
+    const edit = this.registry.findEdit();
+    if (!edit) return null;
+    try {
+      const r = (await this.registry.send(edit.nodeId, "launcher_status", {}, { timeoutMs: 3_000 })) as LauncherStatus | null;
+      return r && typeof r === "object" ? { current: r.current ?? null, last: r.last ?? null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A test Studio is still running that this daemon launched (its port, or a session id we ended), but
+   * that we no longer track: left behind by a failed launch, a detached server node or an edit-node
+   * fallback that could not stop it.
+   */
+  async strayOwnTest(): Promise<LauncherStatus["current"] | null> {
+    const st = await this.launcherStatus();
+    const cur = st?.current;
+    if (!cur) return null;
+    if (this.session && this.session.sessionId === cur.sessionId && this.session.state !== "ended") return null;
+    return cur.port === this.opts.port || this.endedIds().has(cur.sessionId) ? cur : null;
   }
 
   close(): void {
@@ -122,7 +197,7 @@ export class SessionManager {
       const sid = typeof e.event.sessionId === "string" ? e.event.sessionId : null;
       if (s && sid === s.sessionId && s.state !== "ending" && s.state !== "ended") {
         this.clearIdle();
-        const why = typeof e.event.reason === "string" && e.event.reason ? e.event.reason : "ended in Studio";
+        const why = describeSessionEnd(e.event);
         this.log(`session ${s.sessionId} ended by the edit node: ${why}`);
         this.markEnded(s, why);
         // Rejects in-flight commands (run_segment) on the session's nodes with SESSION_ERROR.
@@ -220,12 +295,19 @@ export class SessionManager {
     let accepted = false;
     try {
       await this.endStrayTests(edit, o.signal);
-      await this.registry.send(
-        edit.nodeId,
-        "launch_session",
-        { sessionId, mode, players: cfg.players },
-        { timeoutMs: 15_000, signal: o.signal },
-      );
+      const params = { sessionId, mode, players: cfg.players };
+      try {
+        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: 25_000, signal: o.signal });
+      } catch (e) {
+        // Studio still tearing down a test of OURS (just stopped, or left behind): wait for the edit node
+        // to report it ended, then try once more. Another daemon's test is refused as before.
+        const m = /running test session (s_\w+) for the daemon on port (\d+)/.exec((e as Error).message ?? "");
+        const ours = m && (Number(m[2]) === this.opts.port || this.endedIds().has(m[1]!));
+        if (!ours || o.signal?.aborted) throw e;
+        o.onProgress?.(`Studio is still ending our previous test ${m[1]}; waiting for it`);
+        await this.waitSessionEnded(new Set([m[1]!]), this.sessionEndWaitMs).done;
+        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: 25_000, signal: o.signal });
+      }
       accepted = true;
       await this.waitReady(s, o);
     } catch (e) {
@@ -262,25 +344,30 @@ export class SessionManager {
       ),
     );
     for (const n of strays) this.registry.drop(n.nodeId, "stray test ended before launch");
-    await ended;
+    await ended.done;
     await new Promise((r) => setTimeout(r, this.strayEndSettleMs));
   }
 
-  /** Resolve when the edit node reports session.ended for one of `ids`, or after `timeoutMs`. */
-  private waitSessionEnded(ids: Set<string>, timeoutMs: number): Promise<void> {
-    if (ids.size === 0) return Promise.resolve();
-    return new Promise<void>((resolve) => {
+  /**
+   * Wait for the edit node to report session.ended for one of `ids`. `done` resolves true when the event
+   * arrived, false on timeout (or an empty set); `cancel()` stops waiting early (resolves false).
+   */
+  private waitSessionEnded(ids: Set<string>, timeoutMs: number): { done: Promise<boolean>; cancel: () => void } {
+    if (ids.size === 0) return { done: Promise.resolve(false), cancel: () => {} };
+    let finish: (seen: boolean) => void = () => {};
+    const done = new Promise<boolean>((resolve) => {
       let off = () => {};
-      const timer = setTimeout(() => done(), timeoutMs);
-      const done = () => {
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      finish = (seen) => {
         clearTimeout(timer);
         off();
-        resolve();
+        resolve(seen);
       };
       off = this.registry.on((e) => {
-        if (e.kind === "event" && e.event.type === "session.ended" && ids.has(String(e.event.sessionId))) done();
+        if (e.kind === "event" && e.event.type === "session.ended" && ids.has(String(e.event.sessionId))) finish(true);
       });
     });
+    return { done, cancel: () => finish(false) };
   }
 
   private readyProblems(s: SessionRecord): string[] {
@@ -373,13 +460,20 @@ export class SessionManager {
     else this.scheduleIdle();
   }
 
-  /** End the current session (server end_session, edit-node fallback). */
-  async end(reason = "requested", result?: "passed" | "failed"): Promise<{ ended: boolean; via: string | null; sessionId: string | null }> {
+  /**
+   * End the current session: `end_session` on the server node (EndTest), the edit node as fallback
+   * (RunService:Stop(), Run mode only). Waits (bounded by sessionEndWaitMs) for the edit node's
+   * `session.ended` so that a launch right after this does not race Studio's teardown.
+   */
+  async end(reason = "requested", result?: "passed" | "failed"): Promise<EndResult> {
     this.clearIdle();
     const s = this.session;
-    if (!s || s.state === "ended") return { ended: false, via: null, sessionId: null };
+    if (!s || s.state === "ended") return { ended: false, via: null, sessionId: null, studioStopped: false };
     s.state = "ending";
+    // Subscribe before sending: a Run-mode test can end before the command result comes back.
+    const confirm = this.waitSessionEnded(new Set([s.sessionId]), this.sessionEndWaitMs);
     let via: string | null = null;
+    let hint: string | undefined;
     const params: Record<string, unknown> = { sessionId: s.sessionId };
     if (result) params.result = result;
     const server = this.registry.findServer(s.sessionId);
@@ -395,16 +489,29 @@ export class SessionManager {
       const edit = this.registry.findEdit(s.placeId);
       if (edit) {
         try {
-          const r = (await this.registry.send(edit.nodeId, "end_session", params, { timeoutMs: this.endTimeoutMs })) as { via?: string };
+          const r = (await this.registry.send(edit.nodeId, "end_session", params, { timeoutMs: this.endTimeoutMs })) as {
+            ended?: boolean;
+            via?: string;
+            reason?: string;
+          };
           via = r?.via ?? "RunService.Stop";
+          if (r?.ended === false) {
+            hint = r.reason ?? `the edit node cannot end a ${s.mode} test; stop it in Studio`;
+            via = null;
+          }
         } catch (e) {
           this.log(`end_session via edit failed: ${(e as Error).message}`);
         }
       }
     }
+    let studioStopped = false;
+    if (via) studioStopped = await confirm.done;
+    else confirm.cancel();
+    if (!via && !hint) hint = `no node could end session ${s.sessionId} (server node gone, edit fallback failed); stop the test in Studio`;
     this.markEnded(s, reason);
     this.registry.dropSession(s.sessionId, "session ended");
-    return { ended: true, via, sessionId: s.sessionId };
+    if (via && !studioStopped) this.log(`session ${s.sessionId}: Studio did not confirm the end within ${this.sessionEndWaitMs}ms`);
+    return { ended: via !== null, via, sessionId: s.sessionId, studioStopped, ...(hint ? { hint } : {}) };
   }
 
   /**
@@ -414,16 +521,48 @@ export class SessionManager {
    * is the last resort and only works for Run mode. A test whose nodes talk to another live daemon
    * cannot be reached from here: stop it from that daemon or in Studio.
    */
-  async stopStudio(reason = "stop_session force"): Promise<{ ended: boolean; via: string | null; sessionId: string | null; strays: number }> {
+  async stopStudio(reason = "stop_session force"): Promise<EndResult & { strays: number }> {
     const own = await this.end(reason);
     const edit = this.registry.findEdit();
     if (!edit) throw new StagehandError("SESSION_ERROR", "no Studio edit node attached");
     const strays = this.registry.list().filter((n) => n.role === "server" && n.placeId === edit.placeId);
     if (strays.length > 0) {
       await this.endStrayTests(edit);
-      return { ended: true, via: "EndTest", sessionId: own.sessionId, strays: strays.length };
+      return { ended: true, via: "EndTest", sessionId: own.sessionId, studioStopped: true, strays: strays.length };
     }
-    const r = (await this.registry.send(edit.nodeId, "end_session", {}, { timeoutMs: this.endTimeoutMs })) as { via?: string };
-    return { ended: own.ended, via: r?.via ?? "RunService.Stop", sessionId: own.sessionId, strays: 0 };
+    const r = (await this.registry.send(edit.nodeId, "end_session", {}, { timeoutMs: this.endTimeoutMs })) as { ended?: boolean; via?: string; reason?: string };
+    const refused = r?.ended === false;
+    return {
+      ended: own.ended || (!refused && r != null),
+      via: r?.via ?? "RunService.Stop",
+      sessionId: own.sessionId,
+      studioStopped: own.studioStopped,
+      strays: 0,
+      ...(refused ? { hint: r.reason } : {}),
+    };
+  }
+
+  /**
+   * stop_session without force: end our tracked session, or, when Studio still runs a test this daemon
+   * launched but lost track of, end that one (via its server node when attached).
+   */
+  async stopOwn(reason = "stop_session"): Promise<EndResult & { strays?: number }> {
+    const own = await this.end(reason);
+    if (own.ended) return own;
+    const stray = await this.strayOwnTest();
+    if (!stray) return own;
+    const edit = this.registry.findEdit();
+    const servers = edit ? this.registry.list().filter((n) => n.role === "server" && n.placeId === edit.placeId) : [];
+    if (edit && servers.length > 0) {
+      await this.endStrayTests(edit);
+      return { ended: true, via: "EndTest", sessionId: stray.sessionId, studioStopped: true, strays: servers.length };
+    }
+    return {
+      ended: false,
+      via: null,
+      sessionId: stray.sessionId,
+      studioStopped: false,
+      hint: `Studio is still running our ${stray.mode} session ${stray.sessionId}, but no server node for it is attached, so it cannot be ended from here: press Stop in Studio (or wait for it to end), then start a new session`,
+    };
   }
 }

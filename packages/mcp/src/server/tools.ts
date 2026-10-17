@@ -33,24 +33,79 @@ function extraOf(e: unknown): ToolExtra {
   return e as ToolExtra;
 }
 
-function runToolResult(result: RunResult): CallToolResult {
+/** Default cap on how long run_* tools block; MCP clients tend to background calls past ~2 minutes. */
+export const DEFAULT_WAIT_MS = 90_000;
+/** Cap on tail_run's long-poll. */
+export const MAX_TAIL_WAIT_MS = 60_000;
+
+const waitArg = z
+  .union([z.boolean(), duration])
+  .describe('How long to wait for the run: true/omitted = 90s, false = return the runId at once, or a duration ("3m"). Past the cap the partial report is returned and the run keeps going (follow it with tail_run / get_run).');
+
+function waitCapMs(wait: boolean | string | number | undefined): number {
+  if (wait === false) return 0;
+  if (wait === true || wait === undefined) return DEFAULT_WAIT_MS;
+  return Math.max(0, parseDuration(wait));
+}
+
+function runToolResult(result: RunResult, note?: string): CallToolResult {
   const md = renderMarkdown(result);
   return {
     isError: result.status === "error",
-    content: [{ type: "text", text: `${md}\nrunId: ${result.runId}\nreport: ${result.dir}` }],
+    content: [{ type: "text", text: `${md}${note ? `\n${note}` : ""}\nrunId: ${result.runId}\nreport: ${result.dir}` }],
   };
 }
 
-async function awaitRun(run: Run, sink: ProgressSink, extra: ToolExtra): Promise<RunResult> {
+/** The report so far for a run that is still going, plus how to keep following it. */
+function partialToolResult(run: Run, note?: string): CallToolResult {
+  const p = run.partialResult();
+  const md = renderMarkdown(p, { partial: true });
+  const hint = `still running after the wait cap: follow it with tail_run (afterSeq ${run.summary().lastSeq}, waitMs "60s" long-polls until the next event) or get_run on the runId below; cancel_run stops it.`;
+  return { isError: false, content: [{ type: "text", text: `${md}${note ? `\n${note}` : ""}\n${hint}\nrunId: ${run.id}\nreport: ${run.dir}` }] };
+}
+
+/**
+ * Wait for a run up to `capMs`, streaming progress. Resolves with the final result, or null when the cap
+ * passed first (the run keeps going; the client's abort still cancels it while we were waiting).
+ */
+async function awaitRun(run: Run, sink: ProgressSink, extra: ToolExtra, capMs: number): Promise<RunResult | null> {
   const stop = sink.follow(run);
   const onAbort = () => run.cancel();
   extra.signal.addEventListener("abort", onAbort, { once: true });
+  let timer: NodeJS.Timeout | null = null;
   try {
-    return await run.done;
+    const capped = new Promise<null>((r) => {
+      timer = setTimeout(() => r(null), capMs);
+    });
+    return await Promise.race([run.done, capped]);
   } finally {
+    if (timer) clearTimeout(timer);
     stop();
     extra.signal.removeEventListener("abort", onAbort);
   }
+}
+
+async function runOrPartial(run: Run, sink: ProgressSink, extra: ToolExtra, wait: boolean | string | number | undefined, note?: string): Promise<CallToolResult> {
+  const cap = waitCapMs(wait);
+  if (cap === 0) return json({ ...run.summary(), hint: "poll with tail_run (waitMs long-polls) / get_run" });
+  const result = await awaitRun(run, sink, extra, cap);
+  return result ? runToolResult(result, note) : partialToolResult(run, note);
+}
+
+/** Resolve when the live run emits any event, finishes, or `ms` pass. */
+function waitForRunEvent(run: Run, ms: number): Promise<void> {
+  if (run.result || ms <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let off = () => {};
+    const timer = setTimeout(() => done(), ms);
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve();
+    };
+    off = run.on(() => done());
+    void run.done.then(() => done());
+  });
 }
 
 function nodeHint(d: Daemon): string | undefined {
@@ -78,6 +133,13 @@ export function registerTools(server: McpServer, d: Daemon): void {
     async () => {
       const cur = d.sessions.current();
       const live = d.catalog.entries().filter((e) => e.name.startsWith("game.")).map((e) => e.name);
+      const launcher = await d.sessions.launcherStatus();
+      const studioTest = launcher?.current ?? null;
+      const ours = studioTest ? studioTest.port === d.sessions.port || d.sessions.endedIds().has(studioTest.sessionId) : false;
+      const tracked = !!(studioTest && cur && cur.sessionId === studioTest.sessionId && cur.state !== "ended");
+      let hint = nodeHint(d) ?? null;
+      if (studioTest && ours && !tracked) hint ??= `Studio is still running our ${studioTest.mode} session ${studioTest.sessionId} that this daemon lost track of; stop_session ends it (or Stop in Studio).`;
+      else if (studioTest && !ours) hint ??= `Studio is running test session ${studioTest.sessionId} for the daemon on port ${studioTest.port}; this daemon cannot launch until it ends.`;
       return json({
         broker: { port: d.broker.port, listening: !d.brokerError, error: d.brokerError },
         root: d.root,
@@ -88,9 +150,11 @@ export function registerTools(server: McpServer, d: Daemon): void {
         session: cur
           ? { sessionId: cur.sessionId, mode: cur.mode, players: cur.players, state: cur.state, sessionPlayers: cur.sessionPlayers }
           : null,
+        /** What Studio's Launcher is running right now (any daemon), and whether it is ours / tracked. */
+        studioTest: studioTest ? { ...studioTest, ours, tracked } : null,
         activeRun: d.runs.active()?.summary() ?? null,
         catalog: { entries: d.catalog.entries().length, liveNodes: d.catalog.liveNodeCount, gameHooks: live, gameHooksVerified: d.catalog.gameVerified },
-        hint: nodeHint(d) ?? null,
+        hint,
       });
     },
   );
@@ -119,10 +183,15 @@ export function registerTools(server: McpServer, d: Daemon): void {
         .filter((e) => !a.kind || e.kind === a.kind)
         .filter((e) => !a.namespace || e.name.startsWith(`${a.namespace.replace(/\.$/, "")}.`))
         .filter((e) => !a.context || e.contexts.includes(a.context));
-      const lines = entries.map(entryLine);
+      const lines = entries.map((e) => entryLine(e) + (e.name.startsWith("game.") && !d.catalog.isLive(e.name) ? " (cached from a previous session; not verified against the running game)" : ""));
       const lua = 'lua [action|condition] (edit|server*|client) as? {code: string}: `lua: "<code>"` action (save-able return) or `wait: lua` / `expect: lua` with code: (truthy = true). Defaults to server (edit in edit mode).';
       if (!a.kind && !a.namespace) lines.push(lua);
-      return text(`${SPEC_CHEATSHEET}\n\n${lines.join("\n")}${d.catalog.gameVerified ? "" : "\n\n(game.* hooks unknown until a session is running)"}`);
+      const footer = d.catalog.gameVerified
+        ? ""
+        : d.catalog.gameEverReported
+          ? "\n\n(no game is running: game.* entries above are cached from the last session and are re-checked when a session starts)"
+          : "\n\n(game.* hooks unknown until a session is running)";
+      return text(`${SPEC_CHEATSHEET}\n\n${lines.join("\n")}${footer}`);
     },
   );
 
@@ -182,7 +251,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
           if (!t) return fail(new StagehandError("BAD_PARAMS", `no saved test "${a.name}"`));
           input = t.text;
         }
-        const v = validateInput(input, d.catalog, { expectName: a.name });
+        const v = validateInput(input, d.catalog, { expectName: a.name, sharedFragments: await d.tests.fragmentMap() });
         return json({
           valid: v.ok,
           errors: v.errors,
@@ -201,7 +270,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Run ad-hoc steps",
       description:
-        'Run unsaved steps in Studio right away (launches or reuses a test session) and return a pass/fail report with expected/actual for failures. steps is a YAML/JSON list of steps (or a whole playtest document), e.g. "- { do: player.setTeam, as: p1, team: Blue }\\n- { expect: player.onTeam, as: p1, team: Blue }". Set session.players (0 = Run mode, 1 = Play, 2-8 = multiplayer). Streams step progress when the client sends a progressToken.',
+        'Run unsaved steps in Studio right away (launches or reuses a test session) and return a pass/fail report with expected/actual for failures. steps is a YAML/JSON list of steps (or a whole playtest document; the other arguments are merged over it), e.g. "- { do: player.setTeam, as: p1, team: Blue }\\n- { expect: player.onTeam, as: p1, team: Blue }". Set session.players (0 = Run mode, 1 = Play, 2-8 = multiplayer); with no mode/players the live session is reused as it is. Streams step progress when the client sends a progressToken; waits up to 90s by default, then returns the partial report.',
       inputSchema: {
         steps: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]).describe("Steps as YAML/JSON text or array"),
         session: sessionSchema.optional(),
@@ -212,7 +281,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
         timeout: duration.optional().describe("Whole-run budget (default 60s)"),
         failOnError: z.boolean().optional().describe("Fail the active step on any error-level Output (default true)"),
         name: z.string().optional().describe("Run name for the report (default adhoc)"),
-        wait: z.boolean().optional().describe("Wait for completion (default true); false returns the runId immediately"),
+        wait: waitArg.optional(),
       },
     },
     async (a, extraRaw) => {
@@ -225,19 +294,26 @@ export function registerTools(server: McpServer, d: Daemon): void {
           if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "steps" in parsed) doc = parsed as Record<string, unknown>;
           else steps = Array.isArray(parsed) ? parsed : [parsed];
         }
+        // A whole document is the base; explicit arguments are merged over it (session keys individually).
         const spec: Record<string, unknown> = doc ?? { name: a.name ?? "adhoc", steps };
-        if (!doc) {
-          if (a.session) spec.session = a.session;
-          if (a.vars) spec.vars = a.vars;
-          if (a.actors) spec.actors = a.actors;
-          if (a.setup) spec.setup = a.setup;
-          if (a.teardown) spec.teardown = a.teardown;
-          if (a.timeout !== undefined) spec.timeout = a.timeout;
-          if (a.failOnError !== undefined) spec.failOnError = a.failOnError;
+        if (a.session) spec.session = { ...((doc?.session as Record<string, unknown> | undefined) ?? {}), ...a.session };
+        if (a.vars) spec.vars = { ...((doc?.vars as Record<string, unknown> | undefined) ?? {}), ...a.vars };
+        if (a.actors) spec.actors = { ...((doc?.actors as Record<string, unknown> | undefined) ?? {}), ...a.actors };
+        if (a.setup) spec.setup = a.setup;
+        if (a.teardown) spec.teardown = a.teardown;
+        if (a.timeout !== undefined) spec.timeout = a.timeout;
+        if (a.failOnError !== undefined) spec.failOnError = a.failOnError;
+        // No mode/players given: run on the session that is live instead of defaulting to Run mode (which
+        // would both reject `as: p1` and replace the live Play session).
+        let note: string | undefined;
+        const sess = spec.session as Record<string, unknown> | undefined;
+        const live = d.sessions.current();
+        if (sess?.mode === undefined && sess?.players === undefined && live?.state === "ready") {
+          spec.session = { ...(sess ?? {}), mode: live.mode, players: live.players, reuse: true, reset: sess?.reset ?? "none" };
+          note = `session: inherited from the live ${live.mode} session (${live.players} player(s), reset: ${String(sess?.reset ?? "none")}); pass session.players to choose another`;
         }
-        const run = d.runs.start({ input: spec, fallbackName: a.name ?? "adhoc" });
-        if (a.wait === false) return json({ ...run.summary(), hint: "poll with tail_run / get_run" });
-        return runToolResult(await awaitRun(run, new ProgressSink(server, extra), extra));
+        const run = d.runs.start({ input: spec, fallbackName: a.name ?? "adhoc", sharedFragments: await d.tests.fragmentMap() });
+        return await runOrPartial(run, new ProgressSink(server, extra), extra, a.wait, note);
       } catch (e) {
         return fail(e);
       }
@@ -249,10 +325,10 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Run a saved playtest",
       description:
-        "Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual, logs around the failure, per-step table). Reports are stored under .stagehand/runs/. With wait: false returns a runId to follow with tail_run/get_run.",
+        "Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual, logs around the failure, per-step table). Reports are stored under .stagehand/runs/. Waits up to 90s by default (wait: a duration to change that), then returns the partial report with the runId to follow via tail_run/get_run; wait: false returns the runId at once.",
       inputSchema: {
         name: z.string().describe("Saved test name"),
-        wait: z.boolean().optional().describe("Wait for completion (default true)"),
+        wait: waitArg.optional(),
         timeout: duration.optional().describe("Override the test's whole-run timeout"),
         vars: z.record(z.string(), z.unknown()).optional().describe("Override/add vars"),
       },
@@ -268,9 +344,9 @@ export function registerTools(server: McpServer, d: Daemon): void {
           expectName: a.name,
           extraVars: a.vars,
           timeoutMs: a.timeout !== undefined ? parseDuration(a.timeout) : undefined,
+          sharedFragments: await d.tests.fragmentMap(),
         });
-        if (a.wait === false) return json({ ...run.summary(), hint: "poll with tail_run / get_run" });
-        return runToolResult(await awaitRun(run, new ProgressSink(server, extra), extra));
+        return await runOrPartial(run, new ProgressSink(server, extra), extra, a.wait);
       } catch (e) {
         return fail(e);
       }
@@ -282,11 +358,12 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Run a suite of playtests",
       description:
-        "Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests). Returns a pass/fail table with each runId and the first failure reason; use get_run for details.",
+        "Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests). Returns a pass/fail table with each runId and the first failure reason; use get_run for details. Blocks up to `timeout` (default 90s): past it the table so far is returned, the in-flight test keeps running (follow its runId with tail_run) and the remaining tests are not started.",
       inputSchema: {
         tag: z.string().optional().describe("Run tests having this tag"),
         names: z.array(z.string()).optional().describe("Run these tests (in order)"),
         stopOnFailure: z.boolean().optional().describe("Stop after the first failing test (default false)"),
+        timeout: duration.optional().describe("How long this call may block (default 90s)"),
       },
     },
     async (a, extraRaw) => {
@@ -297,9 +374,12 @@ export function registerTools(server: McpServer, d: Daemon): void {
         if (a.names?.length) selected = a.names.map((n) => all.find((t) => t.name === n) ?? { name: n, file: "", description: null, tags: [], parseError: "not found" });
         if (a.tag) selected = selected.filter((t) => t.tags.includes(a.tag!));
         if (!selected.length) return fail(new StagehandError("BAD_PARAMS", "no tests matched"));
+        const deadline = Date.now() + (a.timeout !== undefined ? parseDuration(a.timeout) : DEFAULT_WAIT_MS);
+        const sharedFragments = await d.tests.fragmentMap();
         const sink = new ProgressSink(server, extra);
         const rows: Array<Record<string, unknown>> = [];
         let cancelled = false;
+        let inFlight: Run | null = null;
         const onAbort = () => (cancelled = true);
         extra.signal.addEventListener("abort", onAbort, { once: true });
         for (let i = 0; i < selected.length; i++) {
@@ -310,20 +390,27 @@ export function registerTools(server: McpServer, d: Daemon): void {
             rows.push({ name: t.name, status: "error", reason: "test not found" });
             continue;
           }
-          const run = d.runs.start({ input: st.text, fallbackName: t.name, expectName: t.name });
+          const run = d.runs.start({ input: st.text, fallbackName: t.name, expectName: t.name, sharedFragments });
           const stop = sink.follow(run, { base: i, total: selected.length, prefix: `[${t.name}]` });
           const abort = () => run.cancel();
           extra.signal.addEventListener("abort", abort, { once: true });
-          const r = await run.done;
+          const r = await awaitRun(run, sink, extra, Math.max(0, deadline - Date.now()));
           extra.signal.removeEventListener("abort", abort);
           stop();
+          if (!r) {
+            inFlight = run;
+            rows.push({ name: t.name, status: "running", runId: run.id, failure: null });
+            break;
+          }
           rows.push({ name: t.name, status: r.status, runId: r.runId, durationMs: r.durationMs, failure: r.failure ? `${r.failure.step ?? ""} ${r.failure.reason}`.trim() : null });
           if (a.stopOnFailure && r.status !== "passed") break;
         }
         extra.signal.removeEventListener("abort", onAbort);
         const passed = rows.filter((r) => r.status === "passed").length;
-        const lines = [`Suite: ${passed}/${rows.length} passed${rows.length < selected.length ? ` (${selected.length - rows.length} not run)` : ""}`, "", "| Test | Status | Run | Failure |", "|---|---|---|---|"];
+        const finished = rows.filter((r) => r.status !== "running").length;
+        const lines = [`Suite: ${passed}/${finished} passed${rows.length < selected.length ? ` (${selected.length - rows.length} not run)` : ""}`, "", "| Test | Status | Run | Failure |", "|---|---|---|---|"];
         for (const r of rows) lines.push(`| ${String(r.name)} | ${String(r.status).toUpperCase()} | ${String(r.runId ?? "")} | ${String(r.failure ?? r.reason ?? "")} |`);
+        if (inFlight) lines.push("", `Wait cap reached: ${inFlight.name} is still running (follow its run ${inFlight.id} with tail_run waitMs "60s"); the remaining tests were not started. Re-run the suite with names: [...] for them.`);
         return { isError: false, content: [{ type: "text", text: lines.join("\n") }] };
       } catch (e) {
         return fail(e);
@@ -346,7 +433,8 @@ export function registerTools(server: McpServer, d: Daemon): void {
     async (a) => {
       const live = d.runs.get(a.runId);
       if (live && !live.result) {
-        return json({ ...live.summary(), steps: live.stepRecords().map((s) => ({ id: s.id, status: s.status, display: s.display })) });
+        const p = live.partialResult();
+        return a.format === "json" ? json(p) : text(`${renderMarkdown(p, { partial: true })}\nrunId: ${p.runId}\nreport: ${p.dir}`);
       }
       const r = (live?.result ?? (await d.runsStore.get(a.runId))) as RunResult | null;
       if (!r) return fail(new StagehandError("BAD_PARAMS", `no run "${a.runId}"`));
@@ -359,11 +447,12 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Tail run events",
       description:
-        "Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished). Poll with afterSeq = the returned lastSeq to follow a run started with wait: false.",
+        "Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished). Poll with afterSeq = the returned lastSeq to follow a run started with wait: false. With waitMs the call long-polls: it returns as soon as a new event arrives, when the run finishes, or after waitMs (max 60s).",
       inputSchema: {
         runId: z.string().describe('Run id or "latest"'),
         afterSeq: z.number().int().min(0).optional().describe("Only events with seq > afterSeq (default 0)"),
         limit: z.number().int().min(1).max(1000).optional().describe("Max events (default 200)"),
+        waitMs: duration.optional().describe('Long-poll: wait up to this long for new events (e.g. "30s"; max 60s). Default 0 = return at once.'),
       },
       annotations: { readOnlyHint: true },
     },
@@ -375,6 +464,8 @@ export function registerTools(server: McpServer, d: Daemon): void {
       let status: string;
       let runId = a.runId;
       if (live) {
+        const waitMs = a.waitMs !== undefined ? Math.min(MAX_TAIL_WAIT_MS, Math.max(0, parseDuration(a.waitMs))) : 0;
+        if (waitMs > 0 && !live.result && !live.events.some((e) => e.seq > after)) await waitForRunEvent(live, waitMs);
         events = live.events as Array<Record<string, unknown>>;
         status = live.status;
         runId = live.id;
@@ -412,13 +503,18 @@ export function registerTools(server: McpServer, d: Daemon): void {
     "list_tests",
     {
       title: "List saved playtests",
-      description: "List saved playtests in playtests/ with description and tags.",
+      description: "List saved playtests in playtests/ with description and tags, plus the shared step fragments in playtests/_shared/ that `use: <name>` steps can reference.",
       inputSchema: { tag: z.string().optional().describe("Only tests with this tag") },
       annotations: { readOnlyHint: true },
     },
     async (a) => {
       const list = (await d.tests.list()).filter((t) => !a.tag || t.tags.includes(a.tag));
-      return json({ dir: d.tests.dir, tests: list.map((t) => ({ name: t.name, description: t.description, tags: t.tags, ...(t.parseError ? { parseError: t.parseError } : {}) })) });
+      const fragments = await d.tests.fragments();
+      return json({
+        dir: d.tests.dir,
+        tests: list.map((t) => ({ name: t.name, description: t.description, tags: t.tags, ...(t.parseError ? { parseError: t.parseError } : {}) })),
+        fragments: fragments.map((f) => ({ name: f.name, description: f.description, steps: f.steps.length, ...(f.parseError ? { parseError: f.parseError } : {}) })),
+      });
     },
   );
 
@@ -454,7 +550,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
     },
     async (a) => {
       try {
-        const v = validateInput(a.spec, d.catalog, { expectName: a.name });
+        const v = validateInput(a.spec, d.catalog, { expectName: a.name, sharedFragments: await d.tests.fragmentMap() });
         if (!v.ok && !a.force) return { isError: true, content: [{ type: "text", text: JSON.stringify({ saved: false, errors: v.errors, warnings: v.warnings }, null, 2) }] };
         const file = await d.tests.save(a.name, a.spec as string | object);
         return json({ saved: true, file, valid: v.ok, errors: v.errors, warnings: v.warnings });
@@ -517,7 +613,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Stop the Studio test session",
       description:
-        "End the current Studio test session (EndTest on the server; RunService:Stop via the edit node as fallback, which only works for Run mode). Refused while a run is active; cancel_run first. With force: true also ends a test this daemon did not launch but whose server node is attached here (a session left by a restarted daemon); a test driven by another live daemon must be stopped from that daemon or in Studio.",
+        "End the current Studio test session (EndTest on the server; RunService:Stop via the edit node as fallback, which only works for Run mode) and wait for Studio to confirm the teardown, so a start_session right after it does not race. Also ends a test this daemon launched but lost track of (failed launch, detached server node) when its server node is attached. Refused while a run is active; cancel_run first. With force: true also ends a test launched by another (restarted) daemon or by hand whose server node is attached here; a test driven by another live daemon must be stopped from that daemon or in Studio.",
       inputSchema: {
         force: z.boolean().optional().describe("Stop whatever test Studio is running, even one launched by another daemon or by hand"),
       },
@@ -526,8 +622,8 @@ export function registerTools(server: McpServer, d: Daemon): void {
       if (d.runs.active()) return fail(new StagehandError("SESSION_ERROR", "a run is active; cancel_run first"));
       try {
         if (a.force) return json(await d.sessions.stopStudio());
-        const r = await d.sessions.end("stop_session");
-        if (!r.ended) return json({ ...r, hint: "no session of this daemon is running; pass force: true to stop a test launched elsewhere" });
+        const r = await d.sessions.stopOwn("stop_session");
+        if (!r.ended && !r.hint) return json({ ...r, hint: "no session of this daemon is running and Studio reports no test of ours; pass force: true to stop a test launched elsewhere" });
         return json(r);
       } catch (e) {
         return fail(e);

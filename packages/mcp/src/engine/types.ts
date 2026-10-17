@@ -34,6 +34,9 @@ export interface StepRecord {
   target: string;
   nodeId: string | null;
   soft: boolean;
+  /** Step budget (ms) as compiled; `expect` without `within` is instant (withinMs null). */
+  timeoutMs: number;
+  withinMs: number | null;
   status: StepRecordStatus;
   durationMs: number | null;
   startedAt: number | null;
@@ -42,6 +45,8 @@ export interface StepRecord {
   expected?: unknown;
   actual?: unknown;
   error?: ErrorObject;
+  /** One-line suggestion for the author, derived by the daemon from the failure shape. */
+  hint?: string;
   skipReason?: string;
 }
 
@@ -53,6 +58,7 @@ export interface FailureInfo {
   expected?: unknown;
   actual?: unknown;
   error?: ErrorObject;
+  hint?: string;
   node: string | null;
   logsAround: LogRecord[];
 }
@@ -75,4 +81,10 @@ export interface RunResult {
   errors: Diagnostic[];
   warnings: Diagnostic[];
   logCounts: { info: number; warn: number; error: number };
+}
+
+/** Snapshot of a run that is still going (same shape, live status, no finishedAt). */
+export interface PartialRunResult extends Omit<RunResult, "status" | "finishedAt"> {
+  status: RunStatus;
+  finishedAt: string | null;
 }

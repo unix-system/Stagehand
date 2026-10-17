@@ -95,10 +95,75 @@ describe("session manager", () => {
     const sm = h.daemon.sessions;
     const a = await sm.ensure(cfg(1));
     const r = await sm.end("test");
-    expect(r).toEqual({ ended: true, via: "RunService.Stop", sessionId: a.sessionId });
+    expect(r).toEqual({ ended: true, via: "RunService.Stop", sessionId: a.sessionId, studioStopped: true });
     expect(h.studio.ends.map((e) => e.role)).toEqual(["server", "edit"]);
     expect(sm.current()).toBeNull();
     expect(sm.list()[0]).toMatchObject({ sessionId: a.sessionId, state: "ended" });
+  });
+
+  it("end() waits for Studio's session.ended (bounded) so a launch right after does not race", async () => {
+    h = await startHarness();
+    const sm = h.daemon.sessions;
+    const a = await sm.ensure(cfg(1));
+    const r = await sm.end("test");
+    expect(r).toMatchObject({ ended: true, via: "EndTest", studioStopped: true });
+    expect(h.studio.launcher.current).toBeNull();
+    const b = await sm.ensure(cfg(1));
+    expect(b.sessionId).not.toBe(a.sessionId);
+    // without session.ended the wait is bounded and reported
+    await h.close();
+    h = await startHarness({ noSessionEnded: true }, { sessionEndWaitMs: 150 });
+    const c = await h.daemon.sessions.ensure(cfg(1));
+    const t0 = Date.now();
+    const r2 = await h.daemon.sessions.end("test");
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
+    expect(r2).toMatchObject({ ended: true, via: "EndTest", sessionId: c.sessionId, studioStopped: false });
+  });
+
+  it("the edit fallback is honest for a Play test it cannot stop; stop_session explains instead of pretending", async () => {
+    h = await startHarness({ serverEndFails: true, editEndRefuses: true });
+    const sm = h.daemon.sessions;
+    const a = await sm.ensure(cfg(1));
+    const r = await sm.end("test");
+    expect(r).toMatchObject({ ended: false, via: null, sessionId: a.sessionId, studioStopped: false, hint: expect.stringMatching(/RunService:Stop\(\) cannot end/) });
+    expect(sm.current()).toBeNull();
+  });
+
+  it("launch waits for our own test to finish ending and retries once; another daemon's test is refused", async () => {
+    h = await startHarness();
+    const sm = h.daemon.sessions;
+    // Studio still tearing down a session we launched earlier (it will report session.ended in 200ms)
+    h.studio.launcher.current = { sessionId: "s_OLD", mode: "play", players: 1, port: h.studio.port };
+    setTimeout(() => {
+      h!.studio.launcher.current = null;
+      void h!.studio.edit.events([{ type: "session.ended", sessionId: "s_OLD", ok: true, reason: "ended in Studio" }]);
+    }, 200);
+    const a = await sm.ensure(cfg(1));
+    expect(a.mode).toBe("play");
+    expect(h.studio.launches).toHaveLength(1);
+    await sm.end("test");
+    h.studio.launcher.current = { sessionId: "s_OTHER", mode: "play", players: 1, port: h.studio.port + 1 };
+    await expect(sm.ensure(cfg(1))).rejects.toMatchObject({ code: "SESSION_ERROR", message: expect.stringMatching(/for the daemon on port/) });
+  });
+
+  it("stopOwn ends a test we launched but lost track of when its server node is attached; otherwise it says what to do", async () => {
+    h = await startHarness();
+    const sm = h.daemon.sessions;
+    const a = await sm.ensure(cfg(1));
+    // The daemon forgets the session (as after a detached server node) while Studio keeps running it.
+    (sm as unknown as { session: unknown }).session = null;
+    (sm as unknown as { ended: unknown[] }).ended.push({ sessionId: a.sessionId, state: "ended" });
+    const r = await sm.stopOwn();
+    expect(r).toMatchObject({ ended: true, via: "EndTest", sessionId: a.sessionId, strays: 1 });
+    expect(h.studio.launcher.current).toBeNull();
+    await waitFor(() => h!.daemon.registry.list().every((n) => n.role === "edit"), 2000, "session nodes gone");
+    // Studio runs our test but no server node is attached: cannot be ended from here.
+    h.studio.launcher.current = { sessionId: "s_LOST", mode: "play", players: 1, port: h.studio.port };
+    const r2 = await sm.stopOwn();
+    expect(r2).toMatchObject({ ended: false, sessionId: "s_LOST", hint: expect.stringMatching(/no server node.*Stop in Studio/) });
+    // Someone else's test: nothing to do without force.
+    h.studio.launcher.current = { sessionId: "s_THEIRS", mode: "play", players: 1, port: h.studio.port + 1 };
+    expect(await sm.stopOwn()).toMatchObject({ ended: false, sessionId: null });
   });
 
   it("ends idle sessions after the idle timeout", async () => {

@@ -136,6 +136,7 @@ export type CommandType =
   | "eval"
   | "launch_session"
   | "end_session"
+  | "launcher_status"
   | "add_players"
   | "ping"
   | "progress";
@@ -184,7 +185,14 @@ export interface SegmentStepResult {
   id: string;
   status: StepStatus;
   durationMs: number;
+  /** Return value of a lua step / an action (always when non-nil; `null` only with `save`). */
   value?: unknown;
+  /** failed/cancelled: same text as the step.failed event. */
+  reason?: string;
+  /** failed, conditions only; omitted when unknown. */
+  expected?: unknown;
+  actual?: unknown;
+  error?: ErrorObject;
 }
 
 export interface RunSegmentResult {

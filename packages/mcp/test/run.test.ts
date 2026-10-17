@@ -65,7 +65,12 @@ describe("runner: blue-team example end to end", () => {
     await waitFor(() => h!.studio.clientProgress.some((p) => p.playerIndex === 1 && p.snapshot.status === "passed"));
     const last = h.studio.progress.at(-1);
     expect(last).toMatchObject({ runId: r.runId, status: "passed", total: r.steps.length, finished: r.steps.length });
-    expect(last.steps[0]).toMatchObject({ id: r.steps[0]!.id, target: r.steps[0]!.target, status: "passed" });
+    expect(last.steps[0]).toMatchObject({ id: r.steps[0]!.id, target: r.steps[0]!.target, status: "passed", verb: "do", soft: false, timeoutMs: 10000 });
+    expect(typeof last.steps[0].durationMs).toBe("number");
+    expect(last.steps[0].elapsedMs).toBeUndefined();
+    // while a step runs its snapshot carries elapsedMs for the live counter
+    const running = h.studio.progress.flatMap((p) => p.steps as any[]).find((s) => s.status === "running");
+    if (running) expect(typeof running.elapsedMs).toBe("number");
   });
 
   it("produces a passing report", async () => {
@@ -130,6 +135,86 @@ describe("runner: blue-team example end to end", () => {
     expect(f.summary).toMatch(/FAILED/);
     expect(f.summary).toMatch(/"tags": \[\n\s+"Blue"/);
     expect(f.events.some((e) => e.type === "step.failed" && e.stepId === "steps.5" && (e.actual as any).value === false)).toBe(true);
+  });
+
+  it("keeps the failure reason when the step.failed event trails the result (relayed client events)", async () => {
+    h = await startHarness({ impl: blueWorld({ hostileBroken: true }), eventsAfterResultMs: 600 });
+    const run = h.daemon.runs.start({ input: BLUE_TEAM });
+    const r = await run.done;
+    expect(r.status).toBe("failed");
+    expect(r.failure).toMatchObject({
+      step: "steps.5",
+      reason: "condition instance.hasTag not true within 2s",
+      expected: { target: "Workspace.Player1", tag: "Hostile", value: true },
+      actual: { value: false, tags: ["Blue"] },
+    });
+    const failedEvents = run.events.filter((e) => e.type === "step.failed" && e.stepId === "steps.5");
+    expect(failedEvents).toHaveLength(1);
+    expect(failedEvents[0]).toMatchObject({ reason: "condition instance.hasTag not true within 2s", actual: { value: false } });
+    expect(r.failure!.reason).not.toBe("step failed");
+  });
+
+  it("a plugin without result details: waits for the event, and never prints a bare 'step failed' with an error present", async () => {
+    h = await startHarness({ impl: blueWorld({ hostileBroken: true }), bareResults: true, eventsAfterResultMs: 100 });
+    const r = await h.daemon.runs.start({ input: BLUE_TEAM }).done;
+    expect(r.status).toBe("failed");
+    expect(r.failure!.reason).toBe("condition instance.hasTag not true within 2s");
+  });
+
+  it("markdown report: lua values and vars are shown, action failures have no null Expected/Actual block", async () => {
+    h = await startHarness({
+      impl: (step) =>
+        step.verb === "lua"
+          ? { status: "passed", value: step.params.code === "return 1" ? 1 : { lamps: 3, names: ["a", "b"] } }
+          : step.name === "character.jump"
+            ? { status: "failed", reason: "no humanoid", code: "ACTION_ERROR" }
+            : { status: "passed" },
+    });
+    const r = await h.daemon.runs.start({
+      input: {
+        name: "values",
+        session: { players: 1 },
+        steps: [{ lua: "return lamps()", label: "count lamps" }, { lua: "return 1", save: "one" }, { do: "character.jump" }, { do: "player.respawn" }],
+      },
+    }).done;
+    expect(r.status).toBe("failed");
+    const md = files(r.dir).summary;
+    expect(md).toMatch(/count lamps \| server \| PASS → \{"lamps":3,"names":\["a","b"\]\}/);
+    expect(md).toMatch(/## Vars\n\n- `one` = 1/);
+    expect(md).toMatch(/\*\*Reason:\*\* no humanoid/);
+    expect(md).not.toMatch(/Expected:/);
+    expect(md).not.toMatch(/Actual:/);
+    expect(r.steps[0]!.value).toEqual({ lamps: 3, names: ["a", "b"] });
+  });
+
+  it("hints: an instant expect that failed suggests within:, an unset server attribute suggests on: client", async () => {
+    h = await startHarness({
+      impl: (step) =>
+        step.name === "player.attribute"
+          ? { status: "failed", reason: "condition player.attribute is false", code: "ASSERTION_FAILED", expected: { name: "MenuOpen", value: true }, actual: { set: false } }
+          : step.name === "character.alive"
+            ? { status: "failed", reason: "condition character.alive is false", code: "ASSERTION_FAILED", actual: { alive: false } }
+            : { status: "passed" },
+    });
+    const a = await h.daemon.runs.start({ input: { name: "hint-a", session: { players: 1 }, steps: [{ expect: "player.attribute", name: "MenuOpen", value: true }] } }).done;
+    expect(a.failure!.hint).toMatch(/not set on the server.*on: client/);
+    expect(files(a.dir).summary).toMatch(/\*\*Hint:\*\* the attribute is not set on the server/);
+    const b = await h.daemon.runs.start({ input: { name: "hint-b", session: { players: 1 }, steps: [{ expect: "character.alive" }] } }).done;
+    expect(b.failure!.hint).toMatch(/within: 2s/);
+    const c = await h.daemon.runs.start({ input: { name: "hint-c", session: { players: 1 }, steps: [{ expect: "character.alive", within: "100ms" }] } }).done;
+    expect(c.failure!.hint).toBeUndefined();
+  });
+
+  it("markdown report: a spec that never ran has no step table; a long skipped tail collapses", async () => {
+    h = await startHarness({ impl: (step) => (step.name === "character.jump" ? { status: "failed", reason: "nope" } : { status: "passed" }) });
+    const bad = await h.daemon.runs.start({ input: { name: "bad", session: { players: 1 }, steps: [{ do: "nope.nothing" }, { do: "character.jump" }] } }).done;
+    expect(bad.status).toBe("error");
+    expect(files(bad.dir).summary).not.toMatch(/## Steps/);
+    const steps = [{ do: "character.jump" }, ...Array.from({ length: 5 }, () => ({ do: "player.respawn" }))];
+    const r = await h.daemon.runs.start({ input: { name: "tail", session: { players: 1 }, steps } }).done;
+    const md = files(r.dir).summary;
+    expect(md).toMatch(/\| … \| 5 more step\(s\) not run \(aborted\) \|/);
+    expect(md).not.toMatch(/steps\.3/);
   });
 
   it("failOnError attributes an error log to the active step and still tears down", async () => {
@@ -298,13 +383,13 @@ describe("runner: control flow", () => {
     run.on((ev) => {
       if (ev.type === "step.started" && ev.stepId === "steps.0") {
         const sid = h!.daemon.sessions.current()!.sessionId;
-        void h!.studio.edit.events([{ type: "session.ended", sessionId: sid, ok: true, reason: "ended in Studio" }]);
+        void h!.studio.edit.events([{ type: "session.ended", sessionId: sid, ok: true, reason: "ended in Studio", result: "stopped by hand", elapsedMs: 12_000 }]);
       }
     });
     const r = await run.done;
     expect(r.status).toBe("failed");
     expect(r.steps[0]).toMatchObject({ id: "steps.0", status: "failed" });
-    expect(r.failure?.reason).toMatch(/session ended/);
+    expect(r.failure?.reason).toMatch(/session ended \(ended in Studio \(after 12s; Execute\*Async returned "stopped by hand"\): the test was ended outside this daemon/);
     expect(h.daemon.sessions.current()).toBeNull();
     expect(h.daemon.sessions.list().at(-1)!.state).toBe("ended");
   });

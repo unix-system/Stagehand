@@ -11,4 +11,10 @@ return {
 	-- Client nodes relay through the server node over a RemoteFunction (Transport/Remote): in a
 	-- Studio play client HttpService errors "Http requests can only be executed by game server".
 	USE_REMOTE_RELAY = true,
+	-- Input visualisation (docs/plugin.md): client nodes draw a cursor, motion trail, click rings and
+	-- a key strip in a CoreGui ScreenGui, and input.click / input.mouseMove glide the mouse along a
+	-- short curve instead of teleporting it. Set false to send raw VirtualInput only.
+	INPUT_VISUALS = true,
+	-- Cursor glide speed in screen pixels per second; each move is clamped to 0.06–0.22 s.
+	MOUSE_SPEED_PX_S = 4000,
 }

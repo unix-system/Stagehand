@@ -20,7 +20,7 @@ return {
 			kind = "action",
 			contexts = C,
 			default = "client",
-			summary = "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre.",
+			summary = "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre (the cursor glides there along a short curve, visualised in the client window).",
 			actor = "required",
 			params = S.params({ { "target", S.selector() } }, { "target" }),
 		}, {

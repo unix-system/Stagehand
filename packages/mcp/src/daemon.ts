@@ -58,7 +58,7 @@ export class Daemon {
       catalog: this.catalog,
       sessions: this.sessions,
       runs: this.runsStore,
-      awaitCatalogs: (ids) => this.awaitCatalogs(ids),
+      awaitCatalogs: (ids, force) => this.awaitCatalogs(ids, force),
       log: this.log,
       settleMs: opts.settleMs,
       cancelGraceMs: opts.cancelGraceMs,
@@ -72,6 +72,11 @@ export class Daemon {
     });
     this.registry.on((e) => {
       if (e.kind === "event" && e.event.type === "node.ready") this.fetchCatalog(e.node.nodeId, true);
+      // Games register their hooks from scripts that may start after the node attached: re-read every
+      // node of the session once the server says it is ready.
+      if (e.kind === "event" && e.event.type === "session.ready" && typeof e.event.sessionId === "string") {
+        for (const n of this.registry.sessionNodes(e.event.sessionId)) this.fetchCatalog(n.nodeId, true);
+      }
       if (e.kind === "detached") {
         this.catalog.removeLive(e.node.nodeId);
         this.catalogFetches.delete(e.node.nodeId);
@@ -82,6 +87,7 @@ export class Daemon {
   async start(): Promise<number> {
     try {
       const port = await this.broker.listen();
+      this.sessions.setPort(port);
       this.log(`broker listening on http://127.0.0.1:${port}/v1 (root ${this.root})`);
       return port;
     } catch (e) {
@@ -115,8 +121,8 @@ export class Daemon {
     return p;
   }
 
-  async awaitCatalogs(nodeIds: string[]): Promise<void> {
-    const all = Promise.all(nodeIds.map((id) => this.fetchCatalog(id)));
+  async awaitCatalogs(nodeIds: string[], force = false): Promise<void> {
+    const all = Promise.all(nodeIds.map((id) => this.fetchCatalog(id, force)));
     await Promise.race([all, new Promise((r) => setTimeout(r, this.catalogTimeoutMs).unref())]);
   }
 }

@@ -127,6 +127,13 @@ describe("Runner.runSegment", function()
 					withinMs = 100,
 				}),
 				step("steps.3", "do", "session.wait", { duration = "10ms" }),
+				step(
+					"steps.4",
+					"expect",
+					"instance.attribute",
+					{ target = "Workspace.Map", name = "Missing", value = true },
+					{ soft = true }
+				),
 			},
 		})
 		eq(res.status, "failed")
@@ -134,6 +141,23 @@ describe("Runner.runSegment", function()
 		eq(res.steps[2].status, "skipped")
 		eq(res.steps[3].status, "failed")
 		eq(res.steps[4].status, "skipped")
+		-- the result entry carries the failure details too (protocol.md "Result")
+		truthy(res.steps[3].reason:find("within 0.1s"), res.steps[3].reason)
+		eq(res.steps[3].expected.tag, "Nope")
+		eq(res.steps[3].actual.value, false)
+		eq(res.steps[3].error.code, "ASSERTION_FAILED")
+		eq(res.steps[1].error.code, "ASSERTION_FAILED")
+		-- steps.4 is skipped (aborted by steps.2); run the unset-attribute check in its own segment
+		local res2 = runner:runSegment({
+			runId = "r_2b",
+			segmentId = "seg_2b",
+			steps = {
+				step("a", "expect", "instance.attribute", { target = "Workspace.Map", name = "Missing", value = true }),
+			},
+		})
+		eq(res2.steps[1].status, "failed")
+		eq(res2.steps[1].actual.set, false)
+		eq(res2.steps[1].actual.value, nil)
 		local failed
 		for _, e in ipairs(node.events) do
 			if e.type == "step.failed" and e.stepId == "steps.2" then

@@ -18,9 +18,18 @@ export interface PlaytestSpec {
   failOnError?: boolean;
   actors?: Record<string, { player: number }>;
   vars?: Record<string, unknown>;
+  /** Named step sequences for `use:` steps (shadow shared fragments of the same name). */
+  fragments?: Record<string, Step[]>;
   setup?: Step[];
   steps: Step[];
   teardown?: Step[];
+}
+
+/** A shared fragment file: playtests/_shared/<name>.fragment.yaml. */
+export interface FragmentSpec {
+  name: string;
+  description?: string;
+  steps: Step[];
 }
 
 export interface Diagnostic {
@@ -31,5 +40,5 @@ export interface Diagnostic {
   line?: number;
 }
 
-export const VERBS = ["do", "wait", "expect", "lua", "parallel", "each"] as const;
+export const VERBS = ["do", "wait", "expect", "lua", "parallel", "each", "use"] as const;
 export type StepVerb = (typeof VERBS)[number];

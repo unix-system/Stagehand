@@ -97,6 +97,73 @@ describe("MCP surface", () => {
     expect(JSON.parse((latest.contents[0] as any).text).runId).toBe(runId);
   });
 
+  it("run_steps past the wait cap returns a partial report; tail_run long-polls; get_run shows live reasons", async () => {
+    const c = await connect({
+      impl: (step) =>
+        step.name === "session.wait"
+          ? { status: "passed", delayMs: 1500 }
+          : step.name === "character.jump"
+            ? { status: "failed", reason: "no humanoid", code: "ACTION_ERROR" }
+            : { status: "passed" },
+    });
+    const t0 = Date.now();
+    const txt = textOf(
+      await c.callTool({
+        name: "run_steps",
+        arguments: {
+          steps: "- { do: character.jump, soft: true }\n- { do: session.wait, duration: 2s, label: long wait }\n- { do: player.respawn }",
+          session: { players: 1 },
+          timeout: "20s",
+          wait: "300ms",
+        },
+      }),
+    );
+    expect(Date.now() - t0).toBeLessThan(1400);
+    expect(txt).toMatch(/# adhoc: RUNNING \(in progress\)/);
+    expect(txt).toMatch(/steps\.0.*FAIL: no humanoid/);
+    expect(txt).toMatch(/still running after the wait cap/);
+    const runId = /^runId: (\S+)$/m.exec(txt)![1]!;
+    const live = textOf(await c.callTool({ name: "get_run", arguments: { runId } }));
+    expect(live).toMatch(/\(in progress\)/);
+    expect(live).toMatch(/steps\.0.*FAIL: no humanoid/); // reasons are visible while the run is still going
+    // long-poll: no new events yet → returns when the next one lands (well before 10s)
+    const tail0 = JSON.parse(textOf(await c.callTool({ name: "tail_run", arguments: { runId } })));
+    const t1 = Date.now();
+    const tail = JSON.parse(textOf(await c.callTool({ name: "tail_run", arguments: { runId, afterSeq: tail0.lastSeq, waitMs: "10s" } })));
+    expect(Date.now() - t1).toBeLessThan(5000);
+    expect(tail.events.length).toBeGreaterThan(0);
+    await h!.daemon.runs.get(runId)!.done;
+    const final = textOf(await c.callTool({ name: "get_run", arguments: { runId } }));
+    expect(final).toMatch(/# adhoc: PASSED/);
+    expect(final).toMatch(/Soft failures: `steps\.0`/);
+  });
+
+  it("run_steps inherits the live session and merges arguments over a document", async () => {
+    const c = await connect();
+    const s = JSON.parse(textOf(await c.callTool({ name: "start_session", arguments: { players: 1 } })));
+    const txt = textOf(await c.callTool({ name: "run_steps", arguments: { steps: "- { expect: player.exists, as: p1 }" } }));
+    expect(txt).toMatch(/# adhoc: PASSED/);
+    expect(txt).toMatch(/Session: play, 1 player\(s\), `s_\w+` \(reused\)/);
+    expect(txt).toMatch(/session: inherited from the live play session \(1 player\(s\), reset: none\)/);
+    expect(JSON.parse(textOf(await c.callTool({ name: "stagehand_status", arguments: {} }))).session.sessionId).toBe(s.sessionId);
+    // explicit players: 0 still means Run mode (and relaunches)
+    const run0 = textOf(await c.callTool({ name: "run_steps", arguments: { steps: "- { lua: 'return 1' }", session: { players: 0 } } }));
+    expect(run0).toMatch(/Session: run, 0 player\(s\)/);
+    // a whole document plus a session argument: the argument wins
+    const doc = "name: doc\nsession: { players: 0 }\nvars: { a: 1 }\nsteps:\n  - { expect: player.exists, as: p1 }\n";
+    const merged = textOf(await c.callTool({ name: "run_steps", arguments: { steps: doc, session: { players: 1 }, vars: { b: 2 } } }));
+    expect(merged).toMatch(/# doc: PASSED/);
+    expect(merged).toMatch(/- `a` = 1/);
+    expect(merged).toMatch(/- `b` = 2/);
+  });
+
+  it("validation hints at the live session when a step names an actor with 0 players", async () => {
+    const c = await connect();
+    await c.callTool({ name: "start_session", arguments: { players: 1 } });
+    const bad = textOf(await c.callTool({ name: "run_steps", arguments: { steps: "- { expect: player.exists, as: p1 }", session: { players: 0 } } }));
+    expect(bad).toMatch(/unknown actor "p1" \(session has 0 players; a play session with 1 player\(s\) is live: omit session or pass players: 1 to use it\)/);
+  });
+
   it("run_test + run_suite on saved tests", async () => {
     const c = await connect();
     await c.callTool({ name: "save_test", arguments: { name: "blue-team-gun-hostile", spec: BLUE_TEAM } });

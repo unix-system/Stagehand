@@ -29,11 +29,18 @@ steps:
   - { wait: game.inMatch, timeout: 5s }
 ```
 
-- A hook is a function or `{ run, desc?, kind? = "action" | "condition", params? }`; `params` is an
-  optional JSON Schema object shown to agents by `list_actions`.
+- A hook is a function or `{ run, desc?, kind? = "action" | "condition", params?, actor? }`; `params` is
+  an optional JSON Schema object shown to agents by `list_actions`.
 - `run(player, params)`: `player` is the step actor's `Player` (or `nil` without `as`); `params` is the
   step's params map (JSON values). Condition hooks return truthy/falsy; action hooks may return a
   value for `save`.
+- `actor = "required"` for hooks that act on a player: Stagehand then passes `p1` automatically in a
+  1-player session and rejects a step without `as` when there are 2+ players, so `run` always gets a
+  `Player`. `actor = "none"` marks hooks that take no player (`reset`). The default `"optional"` passes
+  whatever `as` names, or `nil`.
+- Do not name a param `as`, `on`, `timeout`, `within`, `soft`, `label`, `save`, `if` or `with`: those are
+  step modifiers, and a playtest could only reach such a param through `with: { … }` (registration
+  warns about it).
 - `Hooks.client({...})` from a LocalScript registers client-side hooks (bridge under
   `PlayerScripts.StagehandHooks.Invoke`); the server bridge is `ReplicatedStorage.StagehandHooks.Invoke`.
 - The bridge is created only in Studio unless `Hooks.enabledInLive = true` is set before registering.

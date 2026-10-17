@@ -587,6 +587,14 @@ function handlers.launch_session(self, params)
 	return self.launcher:launch(params or {}, self.transport.port, self.transport)
 end
 
+function handlers.launcher_status(self, _params)
+	if self.role ~= "edit" or not self.launcher then
+		Errors.throw("UNKNOWN_COMMAND", "launcher_status is only supported by the edit node")
+	end
+	local st = self.launcher:status()
+	return { current = orNull(st.current), last = orNull(st.last) }
+end
+
 function handlers.end_session(self, params)
 	if self.role == "edit" and self.launcher then
 		return self.launcher:stop(params and params.sessionId)

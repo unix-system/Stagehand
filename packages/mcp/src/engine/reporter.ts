@@ -3,7 +3,7 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { formatDuration } from "../spec/values.js";
-import type { RunEvent, RunResult, StepRecord } from "./types.js";
+import type { PartialRunResult, RunEvent, RunResult, StepRecord } from "./types.js";
 
 export class Reporter {
   private stream: WriteStream | null = null;
@@ -46,16 +46,35 @@ function json(v: unknown): string {
   return "```json\n" + JSON.stringify(v, null, 2) + "\n```";
 }
 
-export function renderMarkdown(r: RunResult): string {
+/** One-line JSON for table cells, truncated so a long lua return does not swallow the report. */
+export function compact(v: unknown, max = 120): string {
+  let s: string;
+  try {
+    s = typeof v === "string" ? v : (JSON.stringify(v) ?? String(v));
+  } catch {
+    s = String(v);
+  }
+  s = s.replace(/\s*\n\s*/g, " ");
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+const NOT_RUN = new Set(["pending", "skipped", "cancelled"]);
+
+/**
+ * Markdown report. Also used for partial (in-progress) results: `partial` adds the live status line
+ * and leaves out the sections that only make sense once the run is over.
+ */
+export function renderMarkdown(r: RunResult | PartialRunResult, opts: { partial?: boolean } = {}): string {
   const lines: string[] = [];
-  lines.push(`# ${r.name}: ${r.status.toUpperCase()}`);
+  lines.push(`# ${r.name}: ${r.status.toUpperCase()}${opts.partial ? " (in progress)" : ""}`);
   lines.push("");
   lines.push(`- Run: \`${r.runId}\``);
-  lines.push(`- Started: ${r.startedAt} (${formatDuration(r.durationMs)})`);
+  lines.push(`- Started: ${r.startedAt} (${formatDuration(r.durationMs)}${opts.partial ? " so far" : ""})`);
   if (r.session)
     lines.push(`- Session: ${r.session.mode}, ${r.session.players} player(s)${r.session.sessionId ? `, \`${r.session.sessionId}\`` : ""}${r.session.reused ? " (reused)" : ""}`);
+  const ran = r.counts.passed + r.counts.failed;
   lines.push(
-    `- Steps: ${r.counts.passed} passed, ${r.counts.failed} failed, ${r.counts.skipped} skipped${r.counts.cancelled ? `, ${r.counts.cancelled} cancelled` : ""}`,
+    `- Steps: ${r.counts.passed} passed, ${r.counts.failed} failed, ${r.counts.skipped} skipped${r.counts.cancelled ? `, ${r.counts.cancelled} cancelled` : ""}${opts.partial ? `, ${r.counts.pending} pending` : ""}`,
   );
   lines.push(`- Logs: ${r.logCounts.error} error(s), ${r.logCounts.warn} warning(s)`);
   if (r.errors.length) {
@@ -67,19 +86,40 @@ export function renderMarkdown(r: RunResult): string {
     lines.push("", "## Failure", "");
     if (f.step) lines.push(`Step \`${f.step}\`: ${f.display ?? ""}${f.node ? ` (node ${f.node})` : ""}`, "");
     lines.push(`**Reason:** ${f.reason}`);
-    if (f.expected !== undefined) lines.push("", "Expected:", json(f.expected));
-    if (f.actual !== undefined) lines.push("", "Actual:", json(f.actual));
+    if (f.hint) lines.push("", `**Hint:** ${f.hint}`);
+    // Actions have no expected/actual; the plugin sends null for them, which is not worth a block.
+    if (f.expected != null) lines.push("", "Expected:", json(f.expected));
+    if (f.actual != null) lines.push("", "Actual:", json(f.actual));
     if (f.logsAround.length) {
       lines.push("", "Logs around the failure:", "", "```");
       for (const l of f.logsAround) lines.push(`[${l.level}] ${l.role}${l.stepId ? ` ${l.stepId}` : ""}: ${l.message}`);
       lines.push("```");
     }
   }
-  if (r.steps.length) {
+  // A spec that never ran (validation error) has nothing to say per step; otherwise a trailing run of
+  // steps that never executed collapses into one line.
+  if (r.steps.length && !(r.status === "error" && ran === 0)) {
     lines.push("", "## Steps", "", "| Step | Description | Node | Status | Time |", "|---|---|---|---|---|");
-    for (const s of r.steps) lines.push(stepRow(s));
+    let tail = r.steps.length;
+    while (tail > 0) {
+      const st = r.steps[tail - 1]!.status;
+      if (!NOT_RUN.has(st) || st === "cancelled") break;
+      tail--;
+    }
+    const shown = tail < r.steps.length - 1 ? r.steps.slice(0, tail) : r.steps;
+    for (const s of shown) lines.push(stepRow(s));
+    const rest = r.steps.slice(shown.length);
+    if (rest.length) {
+      const first = rest[0]!;
+      lines.push(`| … | ${rest.length} more step(s) not run (${first.skipReason ?? first.status}) | | | |`);
+    }
   }
   if (r.softFailures.length) lines.push("", `Soft failures: ${r.softFailures.map((s) => `\`${s}\``).join(", ")}`);
+  const vars = Object.entries(r.vars ?? {});
+  if (vars.length) {
+    lines.push("", "## Vars", "");
+    for (const [k, v] of vars) lines.push(`- \`${k}\` = ${cell(compact(v, 400))}`);
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -87,5 +127,6 @@ export function renderMarkdown(r: RunResult): string {
 function stepRow(s: StepRecord): string {
   const status = STATUS_MARK[s.status] ?? s.status;
   const extra = s.status === "failed" && s.reason ? `: ${s.reason}` : s.skipReason ? ` (${s.skipReason})` : "";
-  return `| \`${s.id}\` | ${cell(s.display)}${s.soft ? " (soft)" : ""} | ${s.target} | ${status}${cell(extra)} | ${s.durationMs != null ? formatDuration(s.durationMs) : ""} |`;
+  const value = s.value !== undefined && s.value !== null ? ` → ${compact(s.value)}` : "";
+  return `| \`${s.id}\` | ${cell(s.display)}${s.soft ? " (soft)" : ""} | ${s.target} | ${status}${cell(extra)}${cell(value)} | ${s.durationMs != null ? formatDuration(s.durationMs) : ""} |`;
 }

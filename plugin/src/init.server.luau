@@ -113,19 +113,22 @@ local function main()
 				})
 				runModeNode:start()
 			end,
-			onSessionEnded = function(sid, ok, result)
+			onSessionEnded = function(sid, ok, result, elapsedMs)
 				if runModeNode then
 					runModeNode:stop()
 					runModeNode = nil
 				end
 				-- Tell every daemon the test is over (stopped in Studio, EndTest, or Execute*Async
-				-- errored); daemons ignore sessions they did not launch.
+				-- errored); daemons ignore sessions they did not launch. `result` is what Execute*Async
+				-- returned (the EndTest argument, if any) so the daemon can say why it ended.
 				for _, node in ipairs(nodes) do
 					node:emit({
 						type = "session.ended",
 						sessionId = sid,
 						ok = ok,
 						reason = if ok then "ended in Studio" else "Studio test failed: " .. tostring(result),
+						result = if result == nil then nil else tostring(result),
+						elapsedMs = elapsedMs,
 					})
 				end
 			end,

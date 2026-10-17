@@ -1,0 +1,8 @@
+# A shared fragment: a named step list any playtest in this folder can pull in with `use: spawn-and-check`.
+# The `as` of the use step binds the actor; `vars` on the use step are substituted into these steps.
+name: spawn-and-check
+description: Request a spawn through the game hook and check the character arrived
+steps:
+  - { do: game.requestSpawn }
+  - { wait: character.loaded, timeout: 15s }
+  - { expect: game.hasSpawned }

@@ -59,6 +59,11 @@ export function validateSchema(doc: unknown): Array<Diagnostic & { parts: PathPa
     for (const phase of ["setup", "steps", "teardown"]) {
       if (Array.isArray(d[phase])) walkList(d[phase] as unknown[], [phase], out, c);
     }
+    if (d.fragments && typeof d.fragments === "object") {
+      for (const [name, list] of Object.entries(d.fragments as Record<string, unknown>)) {
+        if (Array.isArray(list)) walkList(list, ["fragments", name], out, c);
+      }
+    }
   }
   if (out.length === 0) out.push(...convert(c.full.errors ?? [], []));
   return dedupe(out);
@@ -70,14 +75,14 @@ function walkList(list: unknown[], base: PathPart[], out: Array<Diagnostic & { p
 
 function walkStep(step: unknown, parts: PathPart[], out: Array<Diagnostic & { parts: PathPart[] }>, c: Compiled) {
   if (!step || typeof step !== "object" || Array.isArray(step)) {
-    out.push(diag(parts, "a step must be a map with one verb key (do | wait | expect | lua | parallel | each)"));
+    out.push(diag(parts, "a step must be a map with one verb key (do | wait | expect | lua | parallel | each | use)"));
     return;
   }
   const s = step as Step;
   const verbs = VERBS.filter((v) => v in s);
   if (verbs.length === 0) {
     out.push(
-      diag(parts, `step has no verb; use exactly one of do | wait | expect | lua | parallel | each (keys: ${Object.keys(s).join(", ")})`),
+      diag(parts, `step has no verb; use exactly one of do | wait | expect | lua | parallel | each | use (keys: ${Object.keys(s).join(", ")})`),
     );
     return;
   }
@@ -107,6 +112,7 @@ const MODIFIER_HINT: Record<string, string> = {
   lua: "lua steps accept only: lua, as, on, timeout, soft, label, save, if",
   parallel: "parallel steps accept only: parallel, soft, label, if (put `as` on the inner steps)",
   each: "each steps accept only: each, soft, label, if",
+  use: "use steps accept only: use, as, vars, soft, label, if",
 };
 
 function convert(errors: AjvError[], base: PathPart[], verb?: string): Array<Diagnostic & { parts: PathPart[] }> {

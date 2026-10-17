@@ -106,6 +106,9 @@ function GameHooks.entries(role: string): { any }
 			if type(params) ~= "table" then
 				params = { type = "object", additionalProperties = true }
 			end
+			-- `actor` is what the hook declared (stagehand-hooks `actor = "required" | "none"`); older
+			-- hooks packages send nothing, which keeps the historical "optional".
+			local actor = if h.actor == "required" or h.actor == "none" then h.actor else "optional"
 			table.insert(
 				out,
 				Meta.entry({
@@ -114,7 +117,7 @@ function GameHooks.entries(role: string): { any }
 					contexts = { role },
 					default = role,
 					summary = if type(h.desc) == "string" then h.desc else "",
-					actor = "optional",
+					actor = actor,
 					params = params,
 					source = "hook",
 				})

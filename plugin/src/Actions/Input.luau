@@ -9,6 +9,10 @@
 	  SendMouseDelta(positionDelta: Vector2)
 	  SendMousePosition(position: Vector2)
 	  SendTextInput(text: string)
+
+	Input visualisation (docs/plugin.md): with Config.INPUT_VISUALS the cursor glides to its target
+	along a Motion.path curve and UI/InputOverlay draws the cursor, trail, click rings and key strip
+	in the client window. The overlay is Studio-only, required lazily and never allowed to fail a step.
 ]]
 
 local Meta = require(script.Parent.Parent.Meta)
@@ -16,6 +20,8 @@ local Env = require(script.Parent.Parent.Env)
 local Errors = require(script.Parent.Parent.Errors)
 local Resolve = require(script.Parent.Parent.Resolve)
 local Conditions = require(script.Parent.Parent.Conditions)
+local Config = require(script.Parent.Parent.Config)
+local Motion = require(script.Parent.Parent.Motion)
 
 local S = Meta.S
 local C = { "client" }
@@ -174,8 +180,70 @@ local function call(method: string, ...)
 	end
 end
 
+-- Overlay (visualisation) -------------------------------------------------------------------
+
+local overlayWarned = false
+
+--- Call `method` on this DataModel's InputOverlay. Never throws: the overlay is cosmetic, so a
+--- failure warns once per DataModel and the step carries on.
+local function overlay(method: string, ...)
+	if not Config.INPUT_VISUALS then
+		return
+	end
+	local args = table.pack(...)
+	local ok, err = pcall(function()
+		-- required lazily: Studio-only GUI code (Roblox globals at module level)
+		local ov = require(script.Parent.Parent.UI.InputOverlay).get()
+		if ov then
+			ov[method](ov, table.unpack(args, 1, args.n))
+		end
+	end)
+	if not ok and not overlayWarned then
+		overlayWarned = true
+		Env.warn("[Stagehand] input overlay unavailable: " .. tostring(err))
+	end
+end
+
+--- Last position VirtualInput was told the mouse is at (Vector2, raw screen pixels). Seeded on
+--- first use from the real mouse, else the viewport centre, else (0,0); nil only without Vector2.
+Input.lastPos = nil
+
+local function initLastPos()
+	if Input.lastPos then
+		return Input.lastPos
+	end
+	local V2 = Env.datatype("Vector2")
+	if not V2 then
+		return nil
+	end
+	local uis = Env.service("UserInputService")
+	local ok, p = pcall(function()
+		return uis:GetMouseLocation()
+	end)
+	if ok and p and p.X == p.X and p.Y == p.Y then
+		Input.lastPos = V2.new(p.X, p.Y)
+		return Input.lastPos
+	end
+	local ws = Env.service("Workspace")
+	local ok2, c = pcall(function()
+		return ws.CurrentCamera.ViewportSize / 2
+	end)
+	if ok2 and c then
+		Input.lastPos = V2.new(c.X, c.Y)
+		return Input.lastPos
+	end
+	Input.lastPos = V2.new(0, 0)
+	return Input.lastPos
+end
+
 function Input.key(down: boolean, keyCode)
 	call("SendKey", down, keyCode, false)
+	local okName, name = pcall(function()
+		return keyCode.Name
+	end)
+	if okName and name then
+		overlay(if down then "keyDown" else "keyUp", Motion.keyLabel(tostring(name)))
+	end
 end
 
 local BUTTONS = { Left = "MouseButton1", Right = "MouseButton2", Middle = "MouseButton3" }
@@ -192,17 +260,69 @@ end
 
 function Input.mouseDelta(delta)
 	call("SendMouseDelta", delta)
+	local from = initLastPos()
+	if from then
+		Input.lastPos = from + delta
+		overlay("cursor", Input.lastPos)
+	end
 end
 
 function Input.text(text: string)
 	call("SendTextInput", text)
+	overlay("text", text)
+end
+
+local FRAME = 1 / 60
+
+--- Glide the mouse from its last known position to `pos` along a short curve, sending a
+--- SendMousePosition per sample and drawing cursor + trail. Total time ≈ Motion.duration
+--- (0.06–0.22 s); samples are batched per frame when they are denser than 60 Hz. Honours the step
+--- budget and cancellation through ctx.frame / ctx.sleep. Ends exactly at `pos`.
+function Input.moveTo(ctx, pos)
+	local from = initLastPos()
+	if not Config.INPUT_VISUALS or from == nil then
+		Input.mousePosition(pos)
+		Input.lastPos = pos
+		return
+	end
+	local dist = (pos - from).Magnitude
+	if dist < 1 then
+		Input.mousePosition(pos)
+		Input.lastPos = pos
+		overlay("cursor", pos)
+		return
+	end
+	local V2 = Env.datatype("Vector2")
+	local samples = Motion.path({ x = from.X, y = from.Y }, { x = pos.X, y = pos.Y })
+	local duration = Motion.duration(dist, Config.MOUSE_SPEED_PX_S)
+	local perSample = duration / #samples
+	local batch = if perSample >= FRAME then 1 else math.ceil(FRAME / perSample)
+	local prev = from
+	for i, s in ipairs(samples) do
+		local v = if i == #samples then pos else V2.new(s.x, s.y)
+		Input.mousePosition(v)
+		Input.lastPos = v
+		overlay("trail", prev, v)
+		overlay("cursor", v)
+		prev = v
+		if i < #samples then
+			if batch == 1 then
+				ctx.sleep(perSample)
+			elseif i % batch == 0 then
+				ctx.frame()
+			end
+		end
+	end
+	Input.lastPos = pos
 end
 
 function Input.click(ctx, position, button: string)
-	Input.mousePosition(position)
+	Input.moveTo(ctx, position)
 	Input.mouseButton(position, button, true)
+	overlay("click", position, button, true)
 	ctx.frame()
 	Input.mouseButton(position, button, false)
+	overlay("click", position, button, false)
 end
 
 function Input.keyCode(code: string)
@@ -306,6 +426,7 @@ Input.entries = {
 		contexts = C,
 		default = "client",
 		summary = "Press a key via VirtualInput (down, hold, up).",
+		notes = "Escape and other keys Roblox reserves never reach the game; drive menus with gui.click or a game.* hook.",
 		actor = "required",
 		params = S.params({
 			{ "code", S.string('KeyCode name, e.g. "E", "Space" or "Enum.KeyCode.E"') },
@@ -335,7 +456,7 @@ Input.entries = {
 		kind = "action",
 		contexts = C,
 		default = "client",
-		summary = "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position.",
+		summary = "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position. Moves the cursor along a short curve first (visualised in the client window).",
 		actor = "required",
 		params = S.params({
 			{ "target", S.selector() },
@@ -360,16 +481,16 @@ Input.entries = {
 		kind = "action",
 		contexts = C,
 		default = "client",
-		summary = "Move the mouse to a screen position or by a delta.",
+		summary = "Move the mouse to a screen position (moves the cursor along a short curve, visualised in the client window) or by a raw delta.",
 		actor = "required",
 		params = S.params({
 			{ "position", S.vec(2, "Screen [x,y]") },
 			{ "delta", S.vec(2, "[dx,dy]") },
 		}, {}, { S.requires("position"), S.requires("delta") }),
 	}, {
-		run = function(_ctx, p)
+		run = function(ctx, p)
 			if p.position then
-				Input.mousePosition(vec2(p.position))
+				Input.moveTo(ctx, vec2(p.position))
 			else
 				Input.mouseDelta(vec2(p.delta))
 			end

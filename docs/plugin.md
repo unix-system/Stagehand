@@ -59,6 +59,57 @@ that finds no session id (for example you pressed F5 yourself) attaches as an **
 steps. See [protocol.md](protocol.md) for the wire details and [writing-tests.md](writing-tests.md) for how
 steps are routed to nodes.
 
+## Input visualisation
+
+Client nodes show what their `VirtualInput` is doing, so a watcher can follow a run in each client window
+(Play has one, Multiplayer one per player). Drawn by `plugin/src/UI/InputOverlay.luau` into a `ScreenGui`
+named `StagehandInput`:
+
+- **Cursor**: an 18 px blue ring with a centre dot at the position last sent to `SendMousePosition`; it
+  fades to half opacity after 1.5 s without movement.
+- **Motion trail**: `input.click` and `input.mouseMove { position }` no longer teleport the mouse. The
+  cursor glides along a short Bézier curve (`plugin/src/Motion.luau`: bowed 8–18 % off the chord, side
+  alternating per move, eased in and out) and each sample leaves a thin segment that fades over 0.5 s.
+  `input.mouseMove { delta }` sends the raw delta and only moves the ring.
+- **Click rings**: a ring that expands 12→40 px on each press (blue for Left, amber for Right, grey for
+  Middle), plus a static ring while the button is held.
+- **Key strip**: key caps along the bottom centre for `input.key` and `input.move` (`W`, `Shift`, `Enter`…),
+  lit while held and removed 0.6 s after release; `input.text` shows `⌨ "the text"` for a second.
+
+The overlay is parented to **`CoreGui`** so nothing in the game can cover it or care about it; if that
+parenting throws, it falls back to the local player's **`PlayerGui`**. Every element is `Active = false`
+and the ScreenGui has `IgnoreGuiInset = true`, so positions are the raw screen pixels `VirtualInput` uses
+and the overlay never intercepts the input it draws. `gui.visible`/`gui.click` ignore it because it is not
+under `PlayerGui` (unless the fallback was taken). If a click ever fails with a CoreGui-related
+`VirtualInput` error, this overlay is the first suspect: set `INPUT_VISUALS = false` and retry.
+
+**Disable it** with `INPUT_VISUALS = false` in `plugin/src/Config.luau` (constants only; there is no
+runtime setting yet). `MOUSE_SPEED_PX_S` (default 4000) sets the glide speed; each move is clamped to
+0.06–0.22 s regardless of distance.
+
+**Cost**: a glide is at most 24 position samples spread over ≤0.22 s (samples denser than 60 Hz are sent
+in the same frame), followed by the one-frame press/release, so at 60 fps a click adds ≤0.25 s to a step
+(a background client window rendering slower stretches the glide with it). Drawing
+failures are swallowed: the step still runs, and the node warns once per DataModel.
+
+## Progress widget
+
+Every Studio window of a test shows the **Stagehand Progress** dock widget (`plugin/src/UI/Progress.luau`,
+layout logic in the unit-tested `UI/ProgressModel.luau`), fed by the daemon's `progress` snapshots:
+
+- **Header**: run name, a status pill that pulses while the run is going, a progress bar, and the
+  per-target summary (`SERVER 3/3   P1 2/5`). The subtitle names the step that is running right now.
+- **Running step**: its dot pulses, a live counter shows elapsed time against the step's budget
+  (`2.4s / 10s`, counted on the window's own clock between snapshots) and a thin bar under the label fills
+  toward the budget, turning amber past 75 %. Finished steps keep their duration on the right.
+- **Client windows (multiplayer)**: your own steps are tagged **YOU**; every run of consecutive steps that
+  execute elsewhere (server, other players) folds into one clickable row — `7 steps on SERVER, P2 · running:
+  wait player.onTeam as p2` — with a rolled-up status dot. The group that contains the running step, or the
+  first failed one, expands by itself; click a row to toggle it. **MINE / ALL** in the header turns folding
+  off for that window. The main window always lists every step.
+- **Labels**: a step shows its `label:`; `lua` steps without one show their code (`lua: #game.Players…`),
+  which is why validation recommends a label for every lua step.
+
 ## Phase 0 spike checklist
 
 Whether plugin nodes really load in simulated **client** DataModels (and a few other platform facts) must

@@ -164,7 +164,8 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `inspect` | any | `{ "path"?: string, "tag"?: string, "className"?: string, "depth": 1, "limit": 200 }` (exactly one of path/tag/className) | `{ "nodes": [InspectNode…], "truncated": false }` |
 | `eval` | any | `{ "code": string, "env": { "actor"?: Actor, "vars"?: object } }` | `{ "value": any, "logs": [LogEvent…] }` |
 | `launch_session` | edit | `{ "sessionId": string, "mode": "run" \| "play" \| "multiplayer", "players": 0..8 }` | `{ "accepted": true }` (immediately; readiness = `session.ready` event) |
-| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed" }` | `{ "ended": true, "via": "EndTest" \| "RunService.Stop" }` |
+| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed" }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end |
+| `launcher_status` | edit | `{}` | `{ "current": { sessionId, mode, players, port, startedAt } \| null, "last": { sessionId, ok, result, endedAt, elapsedMs } \| null }` — what the shared Launcher believes Studio is running (any daemon's test) |
 | `add_players` | server | `{ "count": 1..7 }` | `{ "requested": 1 }` |
 | `ping` | any | `{}` | `{ "pong": true, "t": 1234.5 }` |
 | `progress` | edit, client | Progress snapshot (below) | `{}` |
@@ -182,16 +183,24 @@ widgets until the test stops, and multiplayer clients have windows of their own.
   "runId": "r_…", "name": "smoke-play", "status": "running",
   "total": 11, "finished": 4,
   "steps": [
-    { "id": "steps.0", "display": "wait character.alive as p1", "target": "server", "status": "passed" },
+    { "id": "steps.0", "display": "wait character.alive as p1", "target": "server", "status": "passed",
+      "verb": "wait", "soft": false, "timeoutMs": 10000, "durationMs": 1204 },
+    { "id": "steps.4", "display": "spawn via menu", "target": "client#1", "status": "running",
+      "verb": "do", "soft": false, "timeoutMs": 10000, "elapsedMs": 2400 },
     { "id": "steps.5", "display": "expect character.health as p1 on client", "target": "client#1",
-      "status": "failed", "reason": "condition character.health not true within 3s" }
+      "status": "failed", "verb": "expect", "soft": false, "timeoutMs": 3000, "durationMs": 3002,
+      "reason": "condition character.health not true within 3s" }
   ]
 }
 ```
 
 `status` (run): `running | passed | failed | cancelled | error`. Step `status`: `pending | running | passed |
 failed | skipped | cancelled`. `target`: `server | client#N | edit | daemon`; the widget groups its
-per-client summary by it, and a client's widget marks its own `client#<playerIndex>` steps.
+per-client summary by it, and a client's widget marks its own `client#<playerIndex>` steps and folds the
+runs of steps that execute elsewhere into collapsible groups. `elapsedMs` (running steps) is the time since
+the step started as of this snapshot: the widget keeps counting with its own clock, so no clock
+synchronisation is needed; `timeoutMs` is the step budget, `durationMs` the final time of finished steps.
+Older snapshot fields stay as they were; a plugin ignores fields it does not know.
 
 `launch_session` on the edit node: write the `Stagehand.Session` / `Stagehand.SessionPort` settings, then
 call (in a new thread) `ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAsync(args)` for `play`,
@@ -258,7 +267,7 @@ log window (for `scope: all`) is per run as well.
 
 | Step field | Type | Notes |
 |---|---|---|
-| `id` | string | stable path in the spec: `setup.N`, `steps.N`, `teardown.N`, nested `steps.4.parallel.1.0`, `steps.2.each.p2.1` |
+| `id` | string | stable path in the spec: `setup.N`, `steps.N`, `teardown.N`, nested `steps.4.parallel.1.0`, `steps.2.each.p2.1`, `steps.0.use.<fragment>.3` (a `use:` expansion) |
 | `verb` | `"do" \| "wait" \| "expect" \| "lua"` | `parallel`/`each` are compiled away by the daemon |
 | `name` | string \| null | catalog name (`lua` for `wait: lua`/`expect: lua`); null for a `lua` verb |
 | `params` | object | `$var` already substituted where known at compile time; values still in JSON form (node coerces per catalog param type) |
@@ -297,16 +306,32 @@ Result:
   "segmentId": "seg_2",
   "status": "failed",
   "steps": [
-    { "id": "steps.3", "status": "passed", "durationMs": 12 },
-    { "id": "steps.5", "status": "failed", "durationMs": 2003 },
+    { "id": "steps.3", "status": "passed", "durationMs": 12, "value": 2 },
+    { "id": "steps.5", "status": "failed", "durationMs": 2003,
+      "reason": "condition instance.hasTag not true within 2s",
+      "expected": { "target": "Workspace.Player1", "tag": "Hostile", "value": true },
+      "actual": { "value": false, "tags": ["Blue"] },
+      "error": { "code": "ASSERTION_FAILED", "message": "…", "stepId": "steps.5" } },
     { "id": "steps.6", "status": "skipped", "durationMs": 0 }
   ],
   "vars": { "spawn": [120, 5, -40] }
 }
 ```
 
-`status` ∈ `passed | failed | cancelled`; step `status` ∈ `passed | failed | skipped | cancelled`; a step with
-`save` has `"value"`. `vars` is the full var map after the segment (the daemon merges it).
+`status` ∈ `passed | failed | cancelled`; step `status` ∈ `passed | failed | skipped | cancelled`.
+
+| Result entry field | When | Notes |
+|---|---|---|
+| `value` | a `lua` step or an action returned a non-nil value, or the step has `save` | the serialized return value (`save` stores it in `vars`; with `save` a nil value is sent as `null`) |
+| `reason` | `failed` / `cancelled` | the same text as the `step.failed` event (`"cancelled"` for cancelled) |
+| `expected`, `actual` | `failed`, when known | **omitted** when unknown (not `null`); conditions fill them, actions do not |
+| `error` | `failed` / `cancelled` | ErrorObject, same as the event |
+
+The failure details are carried in the result **and** in the `step.failed` event: the result is the
+authoritative, in-order answer to the command, while events travel on a separate channel (client nodes relay
+them through the server) and may arrive after the result. The daemon fills a step record from whichever
+arrives first and only completes missing fields from the other. `vars` is the full var map after the segment
+(the daemon merges it).
 
 ### Cancel
 
@@ -341,7 +366,7 @@ node). Response `{ "ack": 103 }`; the node may drop acknowledged events.
 |---|---|---|
 | `node.ready` | node, after attach + catalog built | `role`, `catalogHash` (see below) |
 | `session.ready` | server node, after required players joined and their characters loaded, or 8 s after the players joined when the game does not spawn them (menu flows) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order, `charactersLoaded` (boolean; false after the grace period) |
-| `session.ended` | edit node, when `Execute*Async` returns | `sessionId`, `ok` (boolean), `reason` (string) |
+| `session.ended` | edit node, when `Execute*Async` returns | `sessionId`, `ok` (boolean), `reason` (string), `result?` (string: what `Execute*Async` returned, i.e. the `EndTest` argument when the game or a tool ended the test), `elapsedMs?` (test lifetime) |
 | `segment.started` | node | `runId`, `segmentId` |
 | `segment.finished` | node | `runId`, `segmentId`, `status` |
 | `step.started` | node | `runId`, `segmentId`, `stepId` |
