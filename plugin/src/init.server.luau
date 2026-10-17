@@ -61,6 +61,19 @@ local function main()
 	local runModeNode = nil
 	-- Shared by every edit node: one "Stagehand Progress" widget per DataModel (widget ids are unique).
 	local ui = {}
+	-- Surface the progress widget the moment a session launches instead of waiting for its first
+	-- `progress` snapshot (which only comes once every node attached and the run started).
+	local function showStarting(sessionId: string?, detail: string?)
+		local okUi, err = pcall(function()
+			if not ui.progressUI then
+				ui.progressUI = require(script.UI.Progress).new(plugin)
+			end
+			ui.progressUI:starting(sessionId, detail)
+		end)
+		if not okUi then
+			warn("[Stagehand] progress UI unavailable: " .. tostring(err))
+		end
+	end
 
 	if role ~= "edit" then
 		local args = testArgs()
@@ -91,6 +104,10 @@ local function main()
 		})
 		node:start()
 		table.insert(nodes, node)
+		-- Only Stagehand-launched tests (they carry a session id); servers have no progress widget.
+		if role == "client" and sessionId then
+			showStarting(sessionId, "waiting for the session to be ready")
+		end
 	else
 		local Launcher = require(script.Launcher)
 		local launcher = Launcher.new({
@@ -146,6 +163,17 @@ local function main()
 			node:start()
 			table.insert(nodes, node)
 		end
+		local shownSession = nil
+		launcher.changed:Connect(function()
+			local cur = launcher.current
+			if cur and cur.sessionId ~= shownSession then
+				shownSession = cur.sessionId
+				showStarting(
+					cur.sessionId,
+					`launching {cur.mode}` .. (if cur.mode == "multiplayer" then `, {cur.players} players` else "")
+				)
+			end
+		end)
 		local okUi, err = pcall(function()
 			require(script.UI.Dock).new(plugin, nodes, launcher, basePort)
 		end)

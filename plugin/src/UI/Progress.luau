@@ -97,8 +97,10 @@ function Progress.new(plugin: Plugin)
 		pulseTween = nil,
 		pillTween = nil,
 	}, Progress)
-	local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 340, 460, 260, 220)
-	self.widget = plugin:CreateDockWidgetPluginGui("StagehandProgress", info)
+	-- Docked left by default. Studio remembers a widget's dock state per id, so the id changed when the
+	-- default moved from Right to Left (the old "StagehandProgress" state would otherwise win).
+	local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Left, false, false, 340, 460, 260, 220)
+	self.widget = plugin:CreateDockWidgetPluginGui("StagehandRunProgress", info)
 	self.widget.Title = "Stagehand Progress"
 	self.widget.Name = "StagehandProgress"
 
@@ -650,6 +652,31 @@ function Progress:_render()
 	else
 		self:_stopHeartbeat()
 	end
+end
+
+--- Open the widget as soon as a test session launches, before the daemon has a run to report.
+--- Clears the previous run; the first snapshot of the next run replaces this placeholder.
+function Progress:starting(sessionId: string?, detail: string?)
+	self.runId = nil
+	self.snapshot = nil
+	self.expanded = {}
+	self:_stopHeartbeat()
+	self:_pulse(nil)
+	for _, row in pairs(self.rows) do
+		row.frame.Visible = false
+	end
+	for _, row in pairs(self.groups) do
+		row.frame.Visible = false
+	end
+	self.scopeButton.Visible = false
+	self.title.Text = "Starting session"
+	self.subtitle.Text = (if sessionId then sessionId else "Test session") .. (if detail then ` · {detail}` else "")
+	self.summary.Text = ""
+	self.pill.Text = "Starting"
+	self.pill.TextColor3, self.pill.BackgroundColor3 = C.running, C.running
+	self:_pillPulse(true, C.running)
+	self.bar.Size = UDim2.fromScale(0, 1)
+	self.widget.Enabled = true
 end
 
 --- Apply a progress snapshot. `mine` ("client#N") marks this window's own steps as YOU.

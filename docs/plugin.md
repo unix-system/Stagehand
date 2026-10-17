@@ -100,7 +100,9 @@ failures are swallowed: the step still runs, and the node warns once per DataMod
 ## Progress widget
 
 Every Studio window of a test shows the **Stagehand Progress** dock widget (`plugin/src/UI/Progress.luau`,
-layout logic in the unit-tested `UI/ProgressModel.luau`), fed by the daemon's `progress` snapshots:
+layout logic in the unit-tested `UI/ProgressModel.luau`), fed by the daemon's `progress` snapshots. It docks
+on the left by default and opens the moment a session launches (edit window) or a test client window loads,
+showing a "Starting session" placeholder until the first snapshot arrives:
 
 - **Header**: run name, a status pill that pulses while the run is going, a progress bar, and the
   per-target summary (`SERVER 3/3   P1 2/5`). The subtitle names the step that is running right now.
