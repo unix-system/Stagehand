@@ -2,7 +2,6 @@
 -- gui.* actions and conditions (client only)
 
 local Meta = require(script.Parent.Parent.Meta)
-local Env = require(script.Parent.Parent.Env)
 local Errors = require(script.Parent.Parent.Errors)
 local Conditions = require(script.Parent.Parent.Conditions)
 local Input = require(script.Parent.Input)
@@ -10,85 +9,8 @@ local Input = require(script.Parent.Input)
 local S = Meta.S
 local C = { "client" }
 
--- Returns (visible, reason)
-local function visibility(inst): (boolean, string?)
-	if not inst:IsA("GuiObject") then
-		return false, inst.ClassName .. " is not a GuiObject"
-	end
-	local node = inst
-	while node do
-		if node:IsA("GuiObject") and not node.Visible then
-			return false, node:GetFullName() .. ".Visible = false"
-		end
-		if node:IsA("LayerCollector") then
-			if not node.Enabled then
-				return false, node:GetFullName() .. ".Enabled = false"
-			end
-			break
-		end
-		node = node.Parent
-	end
-	if not node then
-		return false, "not under a ScreenGui/SurfaceGui/BillboardGui"
-	end
-	if node:IsA("ScreenGui") then
-		local pg = node:FindFirstAncestorWhichIsA("PlayerGui")
-		if not pg then
-			return false, "ScreenGui is not under PlayerGui"
-		end
-	end
-	local size = inst.AbsoluteSize
-	if size.X <= 0 or size.Y <= 0 then
-		return false, "zero AbsoluteSize"
-	end
-	local ws = Env.service("Workspace")
-	local cam = ws and ws.CurrentCamera
-	if cam and node:IsA("ScreenGui") then
-		local vp = cam.ViewportSize
-		local p = inst.AbsolutePosition
-		if p.X + size.X < 0 or p.Y + size.Y < 0 or p.X > vp.X or p.Y > vp.Y then
-			return false, "off screen"
-		end
-	end
-	return true, nil
-end
-
-local function ancestorSignals(inst)
-	local list = {}
-	local node = inst
-	while node do
-		if node:IsA("GuiObject") then
-			table.insert(list, node:GetPropertyChangedSignal("Visible"))
-		elseif node:IsA("LayerCollector") then
-			table.insert(list, node:GetPropertyChangedSignal("Enabled"))
-			break
-		end
-		node = node.Parent
-	end
-	table.insert(list, inst.AncestryChanged)
-	table.insert(list, inst:GetPropertyChangedSignal("AbsoluteSize"))
-	table.insert(list, inst:GetPropertyChangedSignal("AbsolutePosition"))
-	return list
-end
-
 local function guiSignals(ctx, p)
-	local list = {}
-	local ok, inst = pcall(ctx.resolve, p.target)
-	if ok and inst then
-		for _, s in ipairs(ancestorSignals(inst)) do
-			table.insert(list, s)
-		end
-		if p.value ~= nil then
-			table.insert(list, inst:GetPropertyChangedSignal("Text"))
-		end
-	else
-		local player = ctx.player(false)
-		local pg = player and player:FindFirstChildOfClass("PlayerGui")
-		if pg then
-			table.insert(list, pg.DescendantAdded)
-		end
-	end
-	return list
+	return Input.guiSignals(ctx, p.target, p.value ~= nil)
 end
 
 return {
@@ -98,19 +20,12 @@ return {
 			kind = "action",
 			contexts = C,
 			default = "client",
-			summary = "Activate a GuiButton (fires Activated via VirtualInput click at its centre).",
+			summary = "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre (the cursor glides there along a short curve, visualised in the client window).",
 			actor = "required",
 			params = S.params({ { "target", S.selector() } }, { "target" }),
 		}, {
 			run = function(ctx, p)
-				local inst = ctx.resolve(p.target)
-				if not inst:IsA("GuiObject") then
-					Errors.throw("BAD_PARAMS", inst:GetFullName() .. " is not a GuiObject")
-				end
-				local visible, why = visibility(inst)
-				if not visible then
-					Errors.throw("ACTION_ERROR", "cannot click " .. inst:GetFullName() .. ": " .. tostring(why))
-				end
+				local inst = Input.awaitTarget(ctx, p.target, true)
 				local pos = Input.screenPoint(inst)
 				Input.click(ctx, pos, "Left")
 				return { pos.X, pos.Y }
@@ -122,12 +37,12 @@ return {
 			kind = "action",
 			contexts = C,
 			default = "client",
-			summary = "Set a TextBox's Text and fire FocusLost(enterPressed=true).",
+			summary = "Wait for a TextBox to appear and be visible, set its Text and fire FocusLost(enterPressed=true).",
 			actor = "required",
 			params = S.params({ { "target", S.selector() }, { "text", S.string() } }, { "target", "text" }),
 		}, {
 			run = function(ctx, p)
-				local box = ctx.resolve(p.target)
+				local box = Input.awaitTarget(ctx, p.target, true)
 				if not box:IsA("TextBox") then
 					Errors.throw("BAD_PARAMS", box:GetFullName() .. " is not a TextBox")
 				end
@@ -156,7 +71,7 @@ return {
 					return false, { visible = false, reason = "no match" }
 				end
 				for _, inst in ipairs(list) do
-					local ok, why = visibility(inst)
+					local ok, why = Input.visibility(inst)
 					if not ok then
 						return false, { visible = false, target = inst:GetFullName(), reason = why }
 					end

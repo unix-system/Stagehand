@@ -5,6 +5,11 @@
 	  RunService:IsServer() → server (server steps, session.ready, EndTest)
 	  RunService:IsClient() → client (client steps, VirtualInput)
 	Never errors on load: every Studio-only call is guarded.
+
+	Several daemons (one per MCP client) may run at once, each on the next free port of the range
+	[Stagehand.Port, +PORT_RANGE). The edit DataModel keeps one node per port so every daemon sees this
+	Studio; a test session's server/client nodes attach only to the daemon that launched it (its port
+	travels in the test args).
 ]]
 
 local Config = require(script.Config)
@@ -51,85 +56,98 @@ local function main()
 	local Remote = require(script.Transport.Remote)
 	local LogCapture = require(script.LogCapture)
 
-	local args = if role ~= "edit" then testArgs() else nil
-	local sessionId = nil
+	local basePort = tonumber(getSetting(Config.SETTING_PORT)) or Config.DEFAULT_PORT
+	local nodes = {}
+	local runModeNode = nil
+	-- Shared by every edit node: one "Stagehand Progress" widget per DataModel (widget ids are unique).
+	local ui = {}
+
 	if role ~= "edit" then
-		sessionId = (args and args.sessionId) or getSetting(Config.SETTING_SESSION)
+		local args = testArgs()
+		local sessionId = (args and args.sessionId) or getSetting(Config.SETTING_SESSION)
 		if type(sessionId) ~= "string" or sessionId == "" then
 			sessionId = nil
 		end
-	end
-	if role ~= "edit" then
-		print(`[Stagehand] {role} node starting (session {sessionId or "none"})`)
-	end
-	local port = tonumber(args and args.port) or tonumber(getSetting(Config.SETTING_PORT)) or Config.DEFAULT_PORT
-	local http = Http.new(port)
-
-	local transport = http
-	if role == "client" and Config.USE_REMOTE_RELAY then
-		transport = Remote.client()
-	elseif role == "server" and Config.USE_REMOTE_RELAY then
-		Remote.serve(http)
-	end
-
-	local launcher = nil
-	local runModeNode = nil
-	local node = nil
-	if role == "edit" then
-		local Launcher = require(script.Launcher)
-		launcher = Launcher.new({
+		-- Attach only to the daemon that launched this session.
+		local port = tonumber(args and args.port) or tonumber(getSetting(Config.SETTING_SESSION_PORT)) or basePort
+		print(`[Stagehand] {role} node starting (session {sessionId or "none"}, daemon port {port})`)
+		local http = Http.new(port)
+		local transport = http
+		if role == "client" and Config.USE_REMOTE_RELAY then
+			transport = Remote.client()
+		elseif role == "server" and Config.USE_REMOTE_RELAY then
+			Remote.serve(http)
+		end
+		local node = Node.new({
+			role = role,
 			plugin = plugin,
-			port = port,
-			onRunModeStarted = function(sid)
-				-- Run mode simulates in this DataModel: host the session's server node in-process.
+			transport = transport,
+			sessionId = sessionId,
+			expectedPlayers = args and tonumber(args.players) or nil,
+			mode = args and args.mode or nil,
+			version = Config.VERSION,
+			logCapture = LogCapture.new(),
+			ui = ui,
+		})
+		node:start()
+		table.insert(nodes, node)
+	else
+		local Launcher = require(script.Launcher)
+		local launcher = Launcher.new({
+			plugin = plugin,
+			onRunModeStarted = function(sid, transport)
+				-- Run mode simulates in this DataModel: host the session's server node in-process,
+				-- talking to the daemon that launched it.
 				if runModeNode then
 					runModeNode:stop()
 				end
 				runModeNode = Node.new({
 					role = "server",
 					plugin = plugin,
-					transport = http,
+					transport = transport,
 					sessionId = sid,
 					expectedPlayers = 0,
 					version = Config.VERSION,
 					logCapture = LogCapture.new(),
+					ui = ui,
 				})
 				runModeNode:start()
 			end,
-			onSessionEnded = function(sid, ok, result)
+			onSessionEnded = function(sid, ok, result, elapsedMs)
 				if runModeNode then
 					runModeNode:stop()
 					runModeNode = nil
 				end
-				-- Tell the daemon the test is over (stopped in Studio, EndTest, or Execute*Async errored).
-				if node then
+				-- Tell every daemon the test is over (stopped in Studio, EndTest, or Execute*Async
+				-- errored); daemons ignore sessions they did not launch. `result` is what Execute*Async
+				-- returned (the EndTest argument, if any) so the daemon can say why it ended.
+				for _, node in ipairs(nodes) do
 					node:emit({
 						type = "session.ended",
 						sessionId = sid,
 						ok = ok,
 						reason = if ok then "ended in Studio" else "Studio test failed: " .. tostring(result),
+						result = if result == nil then nil else tostring(result),
+						elapsedMs = elapsedMs,
 					})
 				end
 			end,
 		})
-	end
-
-	node = Node.new({
-		role = role,
-		plugin = plugin,
-		transport = transport,
-		sessionId = sessionId,
-		expectedPlayers = args and tonumber(args.players) or nil,
-		mode = args and args.mode or nil,
-		version = Config.VERSION,
-		logCapture = LogCapture.new(),
-		launcher = launcher,
-	})
-	node:start()
-
-	if role == "edit" then
+		for i = 0, Config.PORT_RANGE - 1 do
+			local node = Node.new({
+				role = "edit",
+				plugin = plugin,
+				transport = Http.new(basePort + i),
+				version = Config.VERSION,
+				logCapture = LogCapture.new(),
+				launcher = launcher,
+				ui = ui,
+			})
+			node:start()
+			table.insert(nodes, node)
+		end
 		local okUi, err = pcall(function()
-			require(script.UI.Dock).new(plugin, node, launcher, port)
+			require(script.UI.Dock).new(plugin, nodes, launcher, basePort)
 		end)
 		if not okUi then
 			warn("[Stagehand] dock UI unavailable: " .. tostring(err))
@@ -138,9 +156,15 @@ local function main()
 
 	pcall(function()
 		plugin.Unloading:Connect(function()
-			node:stop()
+			for _, node in ipairs(nodes) do
+				node:stop()
+			end
 			if runModeNode then
 				runModeNode:stop()
+			end
+			if ui.progressUI then
+				ui.progressUI:destroy()
+				ui.progressUI = nil
 			end
 		end)
 	end)

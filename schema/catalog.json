@@ -704,7 +704,8 @@
           "code"
         ],
         "additionalProperties": false
-      }
+      },
+      "notes": "Escape and other keys Roblox reserves never reach the game; drive menus with gui.click or a game.* hook."
     },
     {
       "name": "input.click",
@@ -713,7 +714,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Mouse click at a GuiObject's centre / BasePart's screen position, or at a screen position.",
+      "summary": "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position. Moves the cursor along a short curve first (visualised in the client window).",
       "actor": "required",
       "params": {
         "type": "object",
@@ -764,7 +765,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Move the mouse to a screen position or by a delta.",
+      "summary": "Move the mouse to a screen position (moves the cursor along a short curve, visualised in the client window) or by a raw delta.",
       "actor": "required",
       "params": {
         "type": "object",
@@ -879,7 +880,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Activate a GuiButton (fires Activated via VirtualInput click at its centre).",
+      "summary": "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre (the cursor glides there along a short curve, visualised in the client window).",
       "actor": "required",
       "params": {
         "type": "object",
@@ -902,7 +903,7 @@
         "client"
       ],
       "default": "client",
-      "summary": "Set a TextBox's Text and fire FocusLost(enterPressed=true).",
+      "summary": "Wait for a TextBox to appear and be visible, set its Text and fire FocusLost(enterPressed=true).",
       "actor": "required",
       "params": {
         "type": "object",
@@ -1576,7 +1577,9 @@
         "contexts = [server] for Hooks.server, [client] for Hooks.client, both if registered on both (default server)",
         "kind = hook.kind or action",
         "condition hooks return a truthy/falsy value",
-        "actor's Player is passed as the first argument (server) when `as` is set; params map is passed as the second argument"
+        "actor's Player is passed as the first argument (server) when `as` is set; params map is passed as the second argument",
+        "actor = hook.actor or optional: `required` makes `as` default to p1 with one player and mandatory with 2+ (the hook always gets a Player); `none` means the hook takes no player",
+        "a hook param named like a step modifier (as, on, timeout, within, soft, label, save, if, with) must be passed under with: { ... }"
       ]
     },
     "lua": {

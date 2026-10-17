@@ -414,28 +414,45 @@ function Runner:runSegment(params: any): any
 		if ok then
 			local entry = { id = stepId, status = "passed", durationMs = dur }
 			local extra = { stepId = stepId, durationMs = dur }
+			local sv = Serialize.value(value)
 			if step.save ~= nil and step.save ~= Json.null then
-				local sv = Serialize.value(value)
 				vars[step.save] = sv
 				entry.value = if sv == nil then Json.null else sv
-				extra.value = entry.value
+			elseif sv ~= nil then
+				-- Return values are reported even without `save` so reports can show what a lua step produced.
+				entry.value = sv
 			end
+			extra.value = entry.value
 			table.insert(results, entry)
 			ev("step.passed", extra)
 		elseif failure.error.code == "CANCELLED" or seg.cancelled then
-			table.insert(results, { id = stepId, status = "cancelled", durationMs = dur })
+			local cancelledError = { code = "CANCELLED", message = "cancelled", stepId = stepId }
+			table.insert(
+				results,
+				{ id = stepId, status = "cancelled", durationMs = dur, reason = "cancelled", error = cancelledError }
+			)
 			ev("step.failed", {
 				stepId = stepId,
 				durationMs = dur,
 				reason = "cancelled",
 				expected = Json.null,
 				actual = Json.null,
-				error = { code = "CANCELLED", message = "cancelled", stepId = stepId },
+				error = cancelledError,
 			})
 			status = "cancelled"
 			seg.cancelled = true
 		else
-			table.insert(results, { id = stepId, status = "failed", durationMs = dur })
+			-- The result carries the failure details too (docs/protocol.md "Result"): events from client
+			-- nodes are relayed through the server and can arrive after the command result.
+			local entry =
+				{ id = stepId, status = "failed", durationMs = dur, reason = failure.reason, error = failure.error }
+			if failure.expected ~= nil then
+				entry.expected = failure.expected
+			end
+			if failure.actual ~= nil then
+				entry.actual = failure.actual
+			end
+			table.insert(results, entry)
 			ev("step.failed", {
 				stepId = stepId,
 				durationMs = dur,

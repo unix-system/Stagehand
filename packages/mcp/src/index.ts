@@ -2,7 +2,7 @@
 // stagehand-mcp: HTTP broker for Studio nodes + MCP server over stdio.
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { DEFAULT_PORT } from "./broker/protocol.js";
+import { DEFAULT_PORT, PORT_RANGE } from "./broker/protocol.js";
 import { Daemon } from "./daemon.js";
 import { parseDuration } from "./spec/values.js";
 import { createMcpServer } from "./server/index.js";
@@ -10,7 +10,8 @@ import { createMcpServer } from "./server/index.js";
 const HELP = `stagehand-mcp [options]
 
   --root <dir>          project dir (tests in <root>/playtests, runs in <root>/.stagehand/runs; default cwd)
-  --port <n>            broker port (default $STAGEHAND_PORT or ${DEFAULT_PORT})
+  --port <n>            start of the broker port range (default $STAGEHAND_PORT or ${DEFAULT_PORT}); the first free of n..n+${PORT_RANGE - 1} is used
+  --place <id|name>     Studio to drive when several are open: placeId or a substring of the place name (default $STAGEHAND_PLACE)
   --allow-eval          enable the eval_lua tool
   --idle-timeout <dur>  end idle Studio sessions after this long (default 120s; 0 = never)
   --broker-only         run only the HTTP broker (no MCP stdio), for debugging
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
     options: {
       root: { type: "string" },
       port: { type: "string" },
+      place: { type: "string" },
       "allow-eval": { type: "boolean", default: false },
       "idle-timeout": { type: "string" },
       "broker-only": { type: "boolean", default: false },
@@ -42,6 +44,7 @@ async function main(): Promise<void> {
   const daemon = new Daemon({
     root: values.root ?? process.cwd(),
     port,
+    place: values.place ?? process.env.STAGEHAND_PLACE,
     allowEval: values["allow-eval"],
     sessions: values["idle-timeout"] !== undefined ? { idleTimeoutMs: parseDuration(numOrDur(values["idle-timeout"])) } : undefined,
   });

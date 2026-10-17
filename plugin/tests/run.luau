@@ -7,6 +7,8 @@ require("./Conditions.spec")
 require("./Registry.spec")
 require("./Runner.spec")
 require("./Node.spec")
+require("./Motion.spec")
+require("./ProgressModel.spec")
 
 print(string.format("%d passed, %d failed", H.passed, H.failed))
 for _, f in ipairs(H.failures) do

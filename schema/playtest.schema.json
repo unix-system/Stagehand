@@ -64,6 +64,23 @@
         "$ref": "#/$defs/ident"
       }
     },
+    "fragments": {
+      "description": "Named, reusable step sequences for `use:` steps in this file (they shadow playtests/_shared/<name>.fragment.yaml).",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/fragmentName"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/stepList"
+          },
+          {
+            "minItems": 1
+          }
+        ]
+      }
+    },
     "setup": {
       "$ref": "#/$defs/stepList"
     },
@@ -89,6 +106,10 @@
     "actorName": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "fragmentName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
     "varRef": {
       "type": "string",
@@ -233,8 +254,42 @@
         },
         {
           "$ref": "#/$defs/eachStep"
+        },
+        {
+          "$ref": "#/$defs/useStep"
         }
       ]
+    },
+    "useStep": {
+      "type": "object",
+      "required": [
+        "use"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "$ref": "#/$defs/fragmentName"
+        },
+        "as": {
+          "$ref": "#/$defs/actorName"
+        },
+        "vars": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/ident"
+          }
+        },
+        "soft": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
+        },
+        "if": {
+          "$ref": "#/$defs/varRef"
+        }
+      }
     },
     "doStep": {
       "type": "object",
@@ -269,6 +324,11 @@
                 "required": [
                   "each"
                 ]
+              },
+              {
+                "required": [
+                  "use"
+                ]
               }
             ]
           }
@@ -302,7 +362,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "save": {
           "$ref": "#/$defs/ident"
@@ -349,6 +410,11 @@
                 "required": [
                   "each"
                 ]
+              },
+              {
+                "required": [
+                  "use"
+                ]
               }
             ]
           }
@@ -373,7 +439,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "if": {
           "$ref": "#/$defs/varRef"
@@ -417,6 +484,11 @@
                 "required": [
                   "each"
                 ]
+              },
+              {
+                "required": [
+                  "use"
+                ]
               }
             ]
           }
@@ -444,7 +516,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "if": {
           "$ref": "#/$defs/varRef"
@@ -502,7 +575,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "save": {
           "$ref": "#/$defs/ident"
@@ -544,7 +618,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "if": {
           "$ref": "#/$defs/varRef"
@@ -597,7 +672,8 @@
           "type": "boolean"
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name in reports and the Studio progress widget. Optional, recommended for every lua step."
         },
         "if": {
           "$ref": "#/$defs/varRef"

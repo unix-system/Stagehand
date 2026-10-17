@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compile } from "../src/engine/compile.js";
 import { describePlan, type Plan, stepsOf, targetKey } from "../src/engine/plan.js";
 import { validateInput } from "../src/engine/validate.js";
+import { entryLine } from "../src/server/format.js";
 import { Catalog, type CatalogEntry, type JsonSchema } from "../src/spec/catalog.js";
 import type { PlaytestSpec } from "../src/spec/types.js";
 import { BLUE_TEAM, NIGHT_MODE, TWO_PLAYER } from "./fixtures.js";
@@ -272,6 +273,30 @@ describe("segment merging and modifiers", () => {
     expect(s[5]!.params).toEqual({ target: "$copy" });
   });
 
+  it("warns about save: inside each with several actors", () => {
+    const v = validateInput({ name: "s", session: { players: 2 }, steps: [{ each: { actors: [`p1`, `p2`], steps: [{ lua: "return 1", save: "n", label: "n" }] } }] }, catalog);
+    expect(v.ok).toBe(true);
+    expect(v.warnings.map((w) => w.message).join()).toMatch(/save: n inside each runs once per actor \(p1, p2\)/);
+    const one = validateInput({ name: "s", session: { players: 1 }, steps: [{ each: { actors: "all", steps: [{ lua: "return 1", save: "n", label: "n" }] } }] }, catalog);
+    expect(one.warnings).toEqual([]);
+  });
+
+  it("lua steps display their code and warn when unlabeled", () => {
+    const v = validateInput(
+      { ...base, steps: [{ lua: "return  #game.Players:GetPlayers()", as: "p1" }, { expect: "lua", code: "return vars.n > 0", label: "has players" }, { wait: "lua", code: "return workspace:GetAttribute('Ready') == true and workspace:GetAttribute('Round') ~= nil" }] },
+      catalog,
+    );
+    expect(v.ok).toBe(true);
+    const d = v.plan!.allSteps.map((s) => s.display);
+    expect(d[0]).toBe("lua: #game.Players:GetPlayers() as p1");
+    expect(d[1]).toBe("has players");
+    expect(d[2]).toBe("wait lua: workspace:GetAttribute('Ready') == true and wor…");
+    const w = v.warnings.map((x) => `${x.path}: ${x.message}`);
+    expect(w).toContainEqual(expect.stringMatching(/^steps\[0\]: lua step has no label; add label:/));
+    expect(w).toContainEqual(expect.stringMatching(/^steps\[2\]: wait: lua step has no label/));
+    expect(w.some((x) => x.startsWith("steps[1]"))).toBe(false);
+  });
+
   it("substitutes known vars at compile time but not re-saved ones", () => {
     const plan = ok({ ...base, vars: { pos: [1, 2, 3], copy: "Workspace.A" }, steps: [
       { do: "character.teleport", as: "p1", to: "$pos" },
@@ -280,6 +305,70 @@ describe("segment merging and modifiers", () => {
     ] });
     expect(plan.allSteps[0]!.params.to).toEqual([1, 2, 3]);
     expect(plan.allSteps[2]!.params.target).toBe("$copy");
+  });
+});
+
+describe("fragments (use:)", () => {
+  const spawn = [
+    { do: "player.setTeam", team: "$team" },
+    { do: "game.requestSpawn" },
+    { wait: "character.loaded", timeout: "15s", label: "spawned" },
+    { lua: "return 1", save: "spawnCount", label: "count" },
+  ];
+  const shared = { "spawn-via-menu": spawn };
+
+  it("expands in-file fragments with as/vars, ids under .use.<name>., and reaches saved vars", () => {
+    const v = validateInput(
+      {
+        name: "f",
+        session: { players: 2 },
+        fragments: { "spawn-via-menu": spawn },
+        steps: [
+          { use: "spawn-via-menu", as: "p1", vars: { team: "Blue" } },
+          { use: "spawn-via-menu", as: "p2", vars: { team: "Red" }, soft: true },
+          { do: "instance.destroy", target: "$spawnCount" },
+        ],
+      },
+      catalog,
+    );
+    expect(v.errors).toEqual([]);
+    const ids = v.plan!.allSteps.map((s) => s.id);
+    expect(ids).toEqual([
+      "steps.0.use.spawn-via-menu.0",
+      "steps.0.use.spawn-via-menu.1",
+      "steps.0.use.spawn-via-menu.2",
+      "steps.0.use.spawn-via-menu.3",
+      "steps.1.use.spawn-via-menu.0",
+      "steps.1.use.spawn-via-menu.1",
+      "steps.1.use.spawn-via-menu.2",
+      "steps.1.use.spawn-via-menu.3",
+      "steps.2",
+    ]);
+    const s = v.plan!.allSteps;
+    expect(s[0]).toMatchObject({ actor: { name: "p1", playerIndex: 1 }, params: { team: "Blue" } });
+    expect(s[4]).toMatchObject({ actor: { name: "p2", playerIndex: 2 }, params: { team: "Red" }, soft: true });
+    expect(s[2]!.display).toBe("spawned");
+  });
+
+  it("shared fragments are used when the file has none of that name; in-file ones shadow them", () => {
+    const base = { name: "f", session: { players: 1 }, steps: [{ use: "spawn-via-menu", vars: { team: "Blue" } }] };
+    const a = validateInput(base, catalog, { sharedFragments: shared });
+    expect(a.ok, JSON.stringify(a.errors)).toBe(true);
+    expect(a.plan!.allSteps).toHaveLength(4);
+    const b = validateInput({ ...base, fragments: { "spawn-via-menu": [{ lua: "return 2", label: "override" }] } }, catalog, { sharedFragments: shared });
+    expect(b.plan!.allSteps.map((s) => s.display)).toEqual(["override"]);
+  });
+
+  it("unknown, recursive and misused fragments are errors; if: groups the expansion", () => {
+    const err = (spec: unknown, opts = {}) => validateInput(spec, catalog, opts).errors.map((e) => `${e.path}: ${e.message}`).join("\n");
+    expect(err({ name: "f", steps: [{ use: "nope" }] }, { sharedFragments: shared })).toMatch(/steps\[0\]\.use: unknown fragment "nope" \(known: spawn-via-menu\)/);
+    expect(err({ name: "f", fragments: { loop: [{ use: "loop" }] }, steps: [{ use: "loop" }] })).toMatch(/fragment "loop" uses itself \(loop → loop\)/);
+    expect(err({ name: "f", steps: [{ use: "spawn-via-menu", as: "p9" }] }, { sharedFragments: shared })).toMatch(/unknown actor "p9"/);
+    expect(err({ name: "f", steps: [{ use: "Spawn Via Menu" }] })).toMatch(/steps\[0\]\.use/);
+    expect(err({ name: "f", steps: [{ use: "spawn-via-menu", timeout: "1s" }] }, { sharedFragments: shared })).toMatch(/unknown key "timeout".*use steps accept only/);
+    const v = validateInput({ name: "f", session: { players: 1 }, vars: { go: true }, steps: [{ use: "spawn-via-menu", vars: { team: "Blue" }, if: "$go" }] }, catalog, { sharedFragments: shared });
+    expect(v.ok).toBe(true);
+    expect(v.plan!.steps[0]).toMatchObject({ kind: "group", stepId: "steps.0", ifVar: "go" });
   });
 });
 
@@ -296,7 +385,9 @@ describe("validation errors", () => {
   it("bad / missing / unknown params", () => {
     const e = errorsOf(s([{ do: "character.teleport", too: [0, 0, 0] }])).join("\n");
     expect(e).toMatch(/missing required param "to"/);
-    expect(e).toMatch(/unknown param "too"/);
+    expect(e).toMatch(/unknown param "too" for character.teleport — did you mean "to"\?/);
+    expect(errorsOf(s([{ do: "input.key", key: "E" }])).join()).toMatch(/unknown param "key" for input.key — did you mean "code"\?/);
+    expect(errorsOf(s([{ do: "input.key", wibble: "E" }])).join()).toMatch(/unknown param "wibble" for input.key \(allowed: code, hold\)/);
     expect(errorsOf(s([{ expect: "player.count", op: "equals", value: 1 }])).join()).toMatch(/must be one of/);
     expect(errorsOf(s([{ do: "character.teleport", to: [0, 0] }])).join()).toMatch(/param "to"/);
   });
@@ -317,6 +408,24 @@ describe("validation errors", () => {
     expect(errorsOf(s([{ wait: "character.alive", save: "x" }])).join()).toMatch(/save is only allowed/);
     expect(errorsOf(s([{ do: "player.setTeam", on: "client", team: "Blue" }])).join()).toMatch(/cannot run on client/);
   });
+  it("a hook param named like a modifier is explained, and list_actions-style lines flag it", () => {
+    const c = Catalog.load();
+    const hook = { name: "game.menuButton", kind: "action" as const, contexts: ["client" as const], default: "client" as const, summary: "find a button", actor: "optional" as const, params: { type: "object", properties: { label: { type: "string" }, wait: { type: "number" } }, required: ["label"], additionalProperties: false }, source: "hook" };
+    c.setLive("n_1", "client", [hook]);
+    const spec = (step: Record<string, unknown>) => ({ name: "x", session: { players: 1 }, steps: [step] });
+    const e = validateInput(spec({ do: "game.menuButton", label: "PLAY GAME" }), c).errors.map((d) => d.message).join();
+    expect(e).toMatch(/param "label" collides with the step modifier "label".*with: \{ label: … \}/);
+    expect(validateInput(spec({ do: "game.menuButton", with: { label: "PLAY GAME" } }), c).ok).toBe(true);
+    expect(entryLine(hook)).toMatch(/NOTE: param\(s\) label share a name with step modifiers; pass them under with:/);
+  });
+  it("hooks that declare actor: required default to p1 with one player and demand as with two", () => {
+    const c = Catalog.load();
+    c.setLive("n_1", "server", [{ name: "game.giveCoins", kind: "action", contexts: ["server"], default: "server", summary: "", actor: "required", params: { type: "object", additionalProperties: true }, source: "hook" }]);
+    const one = validateInput({ name: "x", session: { players: 1 }, steps: [{ do: "game.giveCoins", amount: 5 }] }, c);
+    expect(one.ok).toBe(true);
+    expect(one.plan!.allSteps[0]!.actor).toEqual({ name: "p1", playerIndex: 1 });
+    expect(validateInput({ name: "x", session: { players: 2 }, steps: [{ do: "game.giveCoins", amount: 5 }] }, c).errors.map((d) => d.message).join()).toMatch(/needs `as:`/);
+  });
   it("actors and vars", () => {
     expect(errorsOf(s([{ do: "character.jump", as: "p2" }])).join()).toMatch(/unknown actor "p2"/);
     expect(errorsOf(s([{ do: "character.jump" }], { actors: { red: { player: 2 } } })).join()).toMatch(/has 1 player/);
@@ -335,12 +444,24 @@ describe("validation errors", () => {
     const v = validateInput("name: x\nsession: { players: 1 }\nsteps:\n  - { do: character.jump }\n  - { do: nope.nope }\n", catalog);
     expect(v.errors[0]).toMatchObject({ path: "steps[1].do", line: 5 });
   });
-  it("game.* hooks are errors once a running game reported its catalog", () => {
+  it("game.* hooks are strict only while a game node is live; cached entries are provisional afterwards", () => {
     const c = Catalog.load();
     c.setLive("n_9", "server", [{ name: "game.reset", kind: "action", contexts: ["server"], default: "server", summary: "", actor: "none", params: { type: "object" }, source: "hook" }]);
     expect(validateInput(BLUE_TEAM, c).errors.join()).toBeTruthy();
     expect(validateInput(BLUE_TEAM, c).errors[0]!.message).toMatch(/unknown game hook "game.requestSpawn"/);
-    c.setLive("n_9", "server", [{ name: "game.requestSpawn", kind: "action", contexts: ["server"], default: "server", summary: "", actor: "optional", params: { type: "object", additionalProperties: true }, source: "hook" }]);
-    expect(validateInput(BLUE_TEAM, c).ok).toBe(true);
+    const strict = { name: "game.requestSpawn", kind: "action" as const, contexts: ["server" as const], default: "server" as const, summary: "", actor: "optional" as const, params: { type: "object", properties: { team: { type: "string" } }, required: ["team"], additionalProperties: false }, source: "hook" };
+    c.setLive("n_9", "server", [strict]);
+    const spec = (p: Record<string, unknown>) => ({ name: "x", session: { players: 1 }, steps: [{ do: "game.requestSpawn", ...p }] });
+    expect(validateInput(spec({ team: "Blue" }), c).ok).toBe(true);
+    expect(validateInput(spec({}), c).errors.map((e) => e.message).join()).toMatch(/missing required param "team"/);
+    // the session ends: the entry stays for authoring but params are no longer enforced
+    c.removeLive("n_9");
+    expect(c.gameVerified).toBe(false);
+    expect(c.gameEverReported).toBe(true);
+    expect(c.isLive("game.requestSpawn")).toBe(false);
+    const v = validateInput(spec({ tean: "Blue" }), c);
+    expect(v.ok).toBe(true);
+    expect(v.warnings.map((w) => w.message).join()).toMatch(/known from a previous session only/);
+    expect(validateInput({ name: "x", session: { players: 1 }, steps: [{ do: "game.somethingNew" }] }, c).ok).toBe(true);
   });
 });

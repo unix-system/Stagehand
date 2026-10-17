@@ -13,8 +13,10 @@ Workflow:
 3. Call inspect to discover real instance paths (teams, remotes in ReplicatedStorage, tools, GUI under @p1.gui, tags). Never guess paths.
 4. Draft the playtest YAML${name ? ` named "${name}"` : ""}:
    - name: kebab-case; session: { players: N } (0 = no characters / Run mode, 1 = Play, 2+ = multiplayer).
-   - steps: one verb per step (do / wait / expect / lua / parallel / each), flat params, as: p1 for the player.
+   - steps: one verb per step (do / wait / expect / lua / parallel / each / use), flat params, as: p1 for the player.
    - prefer wait:/expect ... within: over fixed sleeps; use teardown with soft: true for cleanup.
+   - give every lua step a label: ("count lamps", "menu is open") — it is the step's name in reports and the Studio widget.
+   - a step sequence that several tests repeat (spawning through a menu, logging in) belongs in a fragment: fragments: { name: [steps] } in the file, or playtests/_shared/<name>.fragment.yaml for all tests, then { use: name, as: p1 }.
 5. Call validate_test with the YAML and fix every error.
 6. Call run_steps (or run with the full document) and iterate until it passes; read failures' expected/actual and logs.
 7. Call save_test to store it in playtests/.

@@ -319,10 +319,11 @@ return {
 				for _, inst in ipairs(list) do
 					local v = inst:GetAttribute(p.name)
 					if not Conditions.compare(p.op, v, p.value) then
-						return false, { value = v, target = inst }
+						return false, { value = v, set = v ~= nil, target = inst }
 					end
 				end
-				return true, { value = list[1]:GetAttribute(p.name) }
+				local first = list[1]:GetAttribute(p.name)
+				return true, { value = first, set = first ~= nil }
 			end,
 			signals = perInstance(function(list, inst, p)
 				table.insert(list, inst:GetAttributeChangedSignal(p.name))

@@ -224,7 +224,9 @@ return {
 		}, {
 			run = function(ctx, p)
 				local v = ctx.player():GetAttribute(p.name)
-				return Conditions.compare(p.op, v, p.value), { value = v }
+				-- `set = false` tells the report (and the daemon's hint) that the attribute is absent here,
+				-- which is what a client-only attribute looks like from the server.
+				return Conditions.compare(p.op, v, p.value), { value = v, set = v ~= nil }
 			end,
 			signals = function(ctx, p)
 				return { ctx.player():GetAttributeChangedSignal(p.name) }

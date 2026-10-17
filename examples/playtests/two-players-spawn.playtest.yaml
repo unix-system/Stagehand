@@ -8,12 +8,9 @@ actors:
 steps:
   - { do: player.setTeam, as: blue, team: Blue }
   - { do: player.setTeam, as: red,  team: Red }
-  - each:
-      actors: [p1, p2]
-      steps:
-        - { do: game.requestSpawn }
-        - { wait: character.loaded, timeout: 15s }
-        - { expect: game.hasSpawned }
+  # The same three spawn steps for each player, from playtests/_shared/spawn-and-check.fragment.yaml.
+  - { use: spawn-and-check, as: p1 }
+  - { use: spawn-and-check, as: p2 }
   - { expect: player.onTeam, as: blue, team: Blue }
   - { expect: player.onTeam, as: red,  team: Red }
   - parallel:

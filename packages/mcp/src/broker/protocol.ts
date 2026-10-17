@@ -4,6 +4,8 @@ import { z } from "zod";
 export const PROTOCOL_VERSION = 1;
 export const BROKER_VERSION = "0.1.0";
 export const DEFAULT_PORT = 38491;
+/** The daemon binds the first free port in [port, port + PORT_RANGE); the plugin scans the same range. */
+export const PORT_RANGE = 10;
 export const POLL_TIMEOUT_MS = 25_000;
 export const EVENT_FLUSH_MS = 50;
 export const DAEMON_TIMEOUT_SLACK_MS = 2_000;
@@ -134,6 +136,7 @@ export type CommandType =
   | "eval"
   | "launch_session"
   | "end_session"
+  | "launcher_status"
   | "add_players"
   | "ping"
   | "progress";
@@ -182,7 +185,14 @@ export interface SegmentStepResult {
   id: string;
   status: StepStatus;
   durationMs: number;
+  /** Return value of a lua step / an action (always when non-nil; `null` only with `save`). */
   value?: unknown;
+  /** failed/cancelled: same text as the step.failed event. */
+  reason?: string;
+  /** failed, conditions only; omitted when unknown. */
+  expected?: unknown;
+  actual?: unknown;
+  error?: ErrorObject;
 }
 
 export interface RunSegmentResult {

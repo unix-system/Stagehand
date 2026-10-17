@@ -62,6 +62,40 @@ describe("broker over HTTP", () => {
     expect(registry.findEdit(0)?.nodeId).toBe(reloaded.nodeId);
   });
 
+  it("listen() falls back to the next port of the range when the first is taken", async () => {
+    const taken = broker.port; // bound in beforeEach
+    const second = new BrokerServer({ registry: new NodeRegistry({ sweepMs: 50 }), port: taken });
+    const port = await second.listen();
+    try {
+      expect(port).not.toBe(taken);
+      expect(port).toBeGreaterThan(taken);
+      expect(port).toBeLessThan(taken + 10);
+      const h = (await (await fetch(`http://127.0.0.1:${port}/v1/health`)).json()) as any;
+      expect(h.port).toBe(port);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it("findEdit prefers the --place Studio (id or name substring), else the newest edit node", async () => {
+    const staging = node({ role: "edit", placeId: 111, placeName: "Staging", instanceId: "s" });
+    const lobby = node({ role: "edit", placeId: 222, placeName: "Lobby Place", instanceId: "l" });
+    await staging.attach();
+    await lobby.attach();
+    expect(registry.findEdit()?.nodeId).toBe(lobby.nodeId);
+    registry.setPreferredPlace("staging");
+    expect(registry.findEdit()?.nodeId).toBe(staging.nodeId);
+    registry.setPreferredPlace("222");
+    expect(registry.findEdit()?.nodeId).toBe(lobby.nodeId);
+    registry.setPreferredPlace("nope");
+    expect(registry.findEdit()?.nodeId).toBe(lobby.nodeId);
+    registry.setPreferredPlace("111");
+    expect(registry.edits().map((e) => [e.placeName, e.selected])).toEqual([
+      ["Lobby Place", false],
+      ["Staging", true],
+    ]);
+  });
+
   it("long-poll returns 204 after the poll timeout", async () => {
     const n = node({ role: "edit" });
     await n.attach();

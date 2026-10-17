@@ -9,17 +9,146 @@
 	  SendMouseDelta(positionDelta: Vector2)
 	  SendMousePosition(position: Vector2)
 	  SendTextInput(text: string)
+
+	Input visualisation (docs/plugin.md): with Config.INPUT_VISUALS the cursor glides to its target
+	along a Motion.path curve and UI/InputOverlay draws the cursor, trail, click rings and key strip
+	in the client window. The overlay is Studio-only, required lazily and never allowed to fail a step.
 ]]
 
 local Meta = require(script.Parent.Parent.Meta)
 local Env = require(script.Parent.Parent.Env)
 local Errors = require(script.Parent.Parent.Errors)
 local Resolve = require(script.Parent.Parent.Resolve)
+local Conditions = require(script.Parent.Parent.Conditions)
+local Config = require(script.Parent.Parent.Config)
+local Motion = require(script.Parent.Parent.Motion)
 
 local S = Meta.S
 local C = { "client" }
 
 local Input = {}
+
+-- GUI visibility (shared with Gui.luau) -----------------------------------------------------
+
+--- Returns (visible, reason) for a GuiObject: it and its ancestors Visible/Enabled, under
+--- PlayerGui, non-zero size and on screen.
+function Input.visibility(inst): (boolean, string?)
+	if not inst:IsA("GuiObject") then
+		return false, inst.ClassName .. " is not a GuiObject"
+	end
+	local node = inst
+	while node do
+		if node:IsA("GuiObject") and not node.Visible then
+			return false, node:GetFullName() .. ".Visible = false"
+		end
+		if node:IsA("LayerCollector") then
+			if not node.Enabled then
+				return false, node:GetFullName() .. ".Enabled = false"
+			end
+			break
+		end
+		node = node.Parent
+	end
+	if not node then
+		return false, "not under a ScreenGui/SurfaceGui/BillboardGui"
+	end
+	if node:IsA("ScreenGui") then
+		local pg = node:FindFirstAncestorWhichIsA("PlayerGui")
+		if not pg then
+			return false, "ScreenGui is not under PlayerGui"
+		end
+	end
+	local size = inst.AbsoluteSize
+	if size.X <= 0 or size.Y <= 0 then
+		return false, "zero AbsoluteSize"
+	end
+	local ws = Env.service("Workspace")
+	local cam = ws and ws.CurrentCamera
+	if cam and node:IsA("ScreenGui") then
+		local vp = cam.ViewportSize
+		local p = inst.AbsolutePosition
+		if p.X + size.X < 0 or p.Y + size.Y < 0 or p.X > vp.X or p.Y > vp.Y then
+			return false, "off screen"
+		end
+	end
+	return true, nil
+end
+
+local function ancestorSignals(inst)
+	local list = {}
+	local node = inst
+	while node do
+		if node:IsA("GuiObject") then
+			table.insert(list, node:GetPropertyChangedSignal("Visible"))
+		elseif node:IsA("LayerCollector") then
+			table.insert(list, node:GetPropertyChangedSignal("Enabled"))
+			break
+		end
+		node = node.Parent
+	end
+	table.insert(list, inst.AncestryChanged)
+	table.insert(list, inst:GetPropertyChangedSignal("AbsoluteSize"))
+	table.insert(list, inst:GetPropertyChangedSignal("AbsolutePosition"))
+	return list
+end
+
+--- Signals that may change whether `target` resolves / is visible (plus Text when `withText`).
+function Input.guiSignals(ctx, target, withText: boolean?)
+	local list = {}
+	local ok, inst = pcall(ctx.resolve, target)
+	if ok and inst then
+		for _, s in ipairs(ancestorSignals(inst)) do
+			table.insert(list, s)
+		end
+		if withText then
+			table.insert(list, inst:GetPropertyChangedSignal("Text"))
+		end
+	else
+		local player = ctx.player(false)
+		local pg = player and player:FindFirstChildOfClass("PlayerGui")
+		if pg then
+			table.insert(list, pg.DescendantAdded)
+		end
+	end
+	return list
+end
+
+--- Resolve `target`, waiting for it to appear and (for a GuiObject) become visible. Uses the step
+--- budget minus a margin so the reason ("no match", "Visible = false", "off screen") reaches the
+--- report instead of the runner's "action exceeded timeout". `guiOnly` rejects non-GuiObjects.
+function Input.awaitTarget(ctx, target, guiOnly: boolean?)
+	local budget = math.max(0.25, (tonumber(ctx.budget) or 10) - 0.5)
+	local status, actual, err = Conditions.waitUntil(function()
+		local inst = ctx.resolve(target)
+		if inst:IsA("GuiObject") then
+			local visible, why = Input.visibility(inst)
+			if not visible then
+				return false, { reason = why }
+			end
+		elseif guiOnly then
+			return false, { reason = inst:GetFullName() .. " is not a GuiObject" }
+		end
+		return true, inst
+	end, {
+		timeout = budget,
+		signals = function()
+			return Input.guiSignals(ctx, target, false)
+		end,
+		cancelled = ctx.cancelled,
+		cancelSignal = ctx.cancelSignal,
+	})
+	if status == "cancelled" then
+		Errors.throw("CANCELLED", "cancelled")
+	end
+	if status ~= "passed" then
+		local why = if err
+			then tostring(err.message)
+			elseif type(actual) == "table" and actual.reason then tostring(actual.reason)
+			else "not found"
+		Errors.throw("ACTION_ERROR", string.format("%s not ready after %.1fs: %s", tostring(target), budget, why))
+	end
+	return actual
+end
 
 local cached = nil
 function Input.virtual()
@@ -51,8 +180,70 @@ local function call(method: string, ...)
 	end
 end
 
+-- Overlay (visualisation) -------------------------------------------------------------------
+
+local overlayWarned = false
+
+--- Call `method` on this DataModel's InputOverlay. Never throws: the overlay is cosmetic, so a
+--- failure warns once per DataModel and the step carries on.
+local function overlay(method: string, ...)
+	if not Config.INPUT_VISUALS then
+		return
+	end
+	local args = table.pack(...)
+	local ok, err = pcall(function()
+		-- required lazily: Studio-only GUI code (Roblox globals at module level)
+		local ov = require(script.Parent.Parent.UI.InputOverlay).get()
+		if ov then
+			ov[method](ov, table.unpack(args, 1, args.n))
+		end
+	end)
+	if not ok and not overlayWarned then
+		overlayWarned = true
+		Env.warn("[Stagehand] input overlay unavailable: " .. tostring(err))
+	end
+end
+
+--- Last position VirtualInput was told the mouse is at (Vector2, raw screen pixels). Seeded on
+--- first use from the real mouse, else the viewport centre, else (0,0); nil only without Vector2.
+Input.lastPos = nil
+
+local function initLastPos()
+	if Input.lastPos then
+		return Input.lastPos
+	end
+	local V2 = Env.datatype("Vector2")
+	if not V2 then
+		return nil
+	end
+	local uis = Env.service("UserInputService")
+	local ok, p = pcall(function()
+		return uis:GetMouseLocation()
+	end)
+	if ok and p and p.X == p.X and p.Y == p.Y then
+		Input.lastPos = V2.new(p.X, p.Y)
+		return Input.lastPos
+	end
+	local ws = Env.service("Workspace")
+	local ok2, c = pcall(function()
+		return ws.CurrentCamera.ViewportSize / 2
+	end)
+	if ok2 and c then
+		Input.lastPos = V2.new(c.X, c.Y)
+		return Input.lastPos
+	end
+	Input.lastPos = V2.new(0, 0)
+	return Input.lastPos
+end
+
 function Input.key(down: boolean, keyCode)
 	call("SendKey", down, keyCode, false)
+	local okName, name = pcall(function()
+		return keyCode.Name
+	end)
+	if okName and name then
+		overlay(if down then "keyDown" else "keyUp", Motion.keyLabel(tostring(name)))
+	end
 end
 
 local BUTTONS = { Left = "MouseButton1", Right = "MouseButton2", Middle = "MouseButton3" }
@@ -69,17 +260,69 @@ end
 
 function Input.mouseDelta(delta)
 	call("SendMouseDelta", delta)
+	local from = initLastPos()
+	if from then
+		Input.lastPos = from + delta
+		overlay("cursor", Input.lastPos)
+	end
 end
 
 function Input.text(text: string)
 	call("SendTextInput", text)
+	overlay("text", text)
+end
+
+local FRAME = 1 / 60
+
+--- Glide the mouse from its last known position to `pos` along a short curve, sending a
+--- SendMousePosition per sample and drawing cursor + trail. Total time ≈ Motion.duration
+--- (0.06–0.22 s); samples are batched per frame when they are denser than 60 Hz. Honours the step
+--- budget and cancellation through ctx.frame / ctx.sleep. Ends exactly at `pos`.
+function Input.moveTo(ctx, pos)
+	local from = initLastPos()
+	if not Config.INPUT_VISUALS or from == nil then
+		Input.mousePosition(pos)
+		Input.lastPos = pos
+		return
+	end
+	local dist = (pos - from).Magnitude
+	if dist < 1 then
+		Input.mousePosition(pos)
+		Input.lastPos = pos
+		overlay("cursor", pos)
+		return
+	end
+	local V2 = Env.datatype("Vector2")
+	local samples = Motion.path({ x = from.X, y = from.Y }, { x = pos.X, y = pos.Y })
+	local duration = Motion.duration(dist, Config.MOUSE_SPEED_PX_S)
+	local perSample = duration / #samples
+	local batch = if perSample >= FRAME then 1 else math.ceil(FRAME / perSample)
+	local prev = from
+	for i, s in ipairs(samples) do
+		local v = if i == #samples then pos else V2.new(s.x, s.y)
+		Input.mousePosition(v)
+		Input.lastPos = v
+		overlay("trail", prev, v)
+		overlay("cursor", v)
+		prev = v
+		if i < #samples then
+			if batch == 1 then
+				ctx.sleep(perSample)
+			elseif i % batch == 0 then
+				ctx.frame()
+			end
+		end
+	end
+	Input.lastPos = pos
 end
 
 function Input.click(ctx, position, button: string)
-	Input.mousePosition(position)
+	Input.moveTo(ctx, position)
 	Input.mouseButton(position, button, true)
+	overlay("click", position, button, true)
 	ctx.frame()
 	Input.mouseButton(position, button, false)
+	overlay("click", position, button, false)
 end
 
 function Input.keyCode(code: string)
@@ -103,20 +346,20 @@ function Input.keyCode(code: string)
 end
 
 --- Screen-space centre (viewport pixels, inset included) of a GuiObject or BasePart.
+--- AbsolutePosition is measured from below the top bar for every ScreenGui, IgnoreGuiInset or not
+--- (an IgnoreGuiInset full-screen frame reports y = -inset), while VirtualInput takes raw screen
+--- pixels, so the inset is always added. Verified live: the conditional version missed by 58 px.
 function Input.screenPoint(inst)
 	local V2 = Env.datatype("Vector2")
 	if inst:IsA("GuiObject") then
 		local centre = inst.AbsolutePosition + inst.AbsoluteSize / 2
-		local sg = inst:FindFirstAncestorWhichIsA("ScreenGui")
-		if sg and not sg.IgnoreGuiInset then
-			local gs = Env.service("GuiService")
-			if gs then
-				local ok, topLeft = pcall(function()
-					return gs:GetGuiInset()
-				end)
-				if ok and topLeft then
-					centre += topLeft
-				end
+		local gs = if inst:FindFirstAncestorWhichIsA("ScreenGui") then Env.service("GuiService") else nil
+		if gs then
+			local ok, topLeft = pcall(function()
+				return gs:GetGuiInset()
+			end)
+			if ok and topLeft then
+				centre += topLeft
 			end
 		end
 		return V2.new(centre.X, centre.Y)
@@ -183,6 +426,7 @@ Input.entries = {
 		contexts = C,
 		default = "client",
 		summary = "Press a key via VirtualInput (down, hold, up).",
+		notes = "Escape and other keys Roblox reserves never reach the game; drive menus with gui.click or a game.* hook.",
 		actor = "required",
 		params = S.params({
 			{ "code", S.string('KeyCode name, e.g. "E", "Space" or "Enum.KeyCode.E"') },
@@ -212,7 +456,7 @@ Input.entries = {
 		kind = "action",
 		contexts = C,
 		default = "client",
-		summary = "Mouse click at a GuiObject's centre / BasePart's screen position, or at a screen position.",
+		summary = "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position. Moves the cursor along a short curve first (visualised in the client window).",
 		actor = "required",
 		params = S.params({
 			{ "target", S.selector() },
@@ -223,7 +467,7 @@ Input.entries = {
 		run = function(ctx, p)
 			local pos
 			if p.target then
-				pos = Input.screenPoint(ctx.resolve(p.target))
+				pos = Input.screenPoint(Input.awaitTarget(ctx, p.target, false))
 			else
 				pos = vec2(p.position)
 			end
@@ -237,16 +481,16 @@ Input.entries = {
 		kind = "action",
 		contexts = C,
 		default = "client",
-		summary = "Move the mouse to a screen position or by a delta.",
+		summary = "Move the mouse to a screen position (moves the cursor along a short curve, visualised in the client window) or by a raw delta.",
 		actor = "required",
 		params = S.params({
 			{ "position", S.vec(2, "Screen [x,y]") },
 			{ "delta", S.vec(2, "[dx,dy]") },
 		}, {}, { S.requires("position"), S.requires("delta") }),
 	}, {
-		run = function(_ctx, p)
+		run = function(ctx, p)
 			if p.position then
-				Input.mousePosition(vec2(p.position))
+				Input.moveTo(ctx, vec2(p.position))
 			else
 				Input.mouseDelta(vec2(p.delta))
 			end

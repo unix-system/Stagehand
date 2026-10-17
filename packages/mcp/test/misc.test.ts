@@ -1,11 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { evaluateLogCondition, luaPatternToRegExp } from "../src/engine/logs.js";
+import { validateInput } from "../src/engine/validate.js";
+import { Catalog } from "../src/spec/catalog.js";
 import { collectVarRefs, isTruthy, parseDuration, substituteVars, varRefName } from "../src/spec/values.js";
 import { RunsStore } from "../src/store/runs.js";
 import { TestsStore } from "../src/store/tests.js";
+
+const catalog = Catalog.load();
 
 describe("values", () => {
   it("parses durations to ms", () => {
@@ -50,7 +55,45 @@ describe("log conditions", () => {
   });
 });
 
+describe("examples", () => {
+  it("every example playtest validates (with the shared example fragments)", async () => {
+    const dir = path.resolve(import.meta.dirname, "../../../examples");
+    const store = new TestsStore(dir);
+    const fragments = await store.fragmentMap();
+    expect(Object.keys(fragments)).toContain("spawn-and-check");
+    const tests = await store.list();
+    expect(tests.length).toBeGreaterThanOrEqual(5);
+    for (const t of tests) {
+      const text = (await store.get(t.name))!.text;
+      const v = validateInput(text, catalog, { expectName: t.name, sharedFragments: fragments });
+      expect(v.errors, `${t.name}: ${JSON.stringify(v.errors)}`).toEqual([]);
+      // examples are the reference: no unlabeled lua steps
+      expect(v.warnings.filter((w) => /no label/.test(w.message)), t.name).toEqual([]);
+    }
+  });
+});
+
 describe("stores", () => {
+  it("lists shared fragments and skips the _shared folder when listing tests", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "stagehand-store-"));
+    try {
+      const t = new TestsStore(root);
+      await mkdir(t.sharedDir, { recursive: true });
+      await writeFile(path.join(t.sharedDir, "login.fragment.yaml"), "description: log in\nsteps:\n  - { lua: 'return 1', label: one }\n", "utf8");
+      await writeFile(path.join(t.sharedDir, "bad.fragment.yaml"), "name: other\nsteps: []\n", "utf8");
+      await writeFile(path.join(t.sharedDir, "not-a-test.playtest.yaml"), "name: not-a-test\nsteps: [{ lua: 'return 1' }]\n", "utf8");
+      expect(await t.list()).toEqual([]);
+      const frags = await t.fragments();
+      expect(frags.map((f) => [f.name, f.parseError === null, f.steps.length])).toEqual([
+        ["bad", false, 0],
+        ["login", true, 1],
+      ]);
+      expect(Object.keys(await t.fragmentMap())).toEqual(["login"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("saves, lists, reads and deletes tests; allocates run dirs", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "stagehand-store-"));
     try {

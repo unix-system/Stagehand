@@ -35,6 +35,8 @@ return {
 				"kind = hook.kind or action",
 				"condition hooks return a truthy/falsy value",
 				"actor's Player is passed as the first argument (server) when `as` is set; params map is passed as the second argument",
+				"actor = hook.actor or optional: `required` makes `as` default to p1 with one player and mandatory with 2+ (the hook always gets a Player); `none` means the hook takes no player",
+				"a hook param named like a step modifier (as, on, timeout, within, soft, label, save, if, with) must be passed under with: { ... }",
 			},
 		},
 		lua = {

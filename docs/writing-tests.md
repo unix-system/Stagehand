@@ -28,7 +28,38 @@ Write tests the way a player experiences the game: put the world in a state (`do
 
 Everything that is not the verb or a modifier (`as`, `on`, `timeout`, `within`, `soft`, `label`, `save`,
 `if`, `with`) is a parameter of the action or condition. If a parameter name collides with a modifier, put
-it under `with: { … }`.
+it under `with: { … }`; validation tells you when a required param was eaten by a modifier of the same
+name (a hook declaring a `label` param is the classic case).
+
+## Label your steps
+
+`label:` is the step's name in run reports, in the `step.*` events and in the Studio progress widget. Every
+`lua` step should have one: without it the step shows as `lua: <first line of code…>` and validation
+warns. Built-in actions read fine on their own (`do gui.click as p1`), but a label still helps when the
+same action appears several times (`label: open the shop`, `label: buy the sword`). Labels are plain
+display text, never used for matching.
+
+## Reuse steps with fragments
+
+When several tests repeat the same sequence (click through a menu, log in, enter a round), put it in a
+fragment and `use:` it instead of pasting it, so a change to the flow is made once:
+
+```yaml
+# playtests/_shared/spawn-via-menu.fragment.yaml
+name: spawn-via-menu
+steps:
+  - { do: gui.click, target: "@p1.gui.Menu.Play" }
+  - { wait: player.onTeam, team: $team, timeout: 30s }
+```
+
+```yaml
+steps:
+  - { use: spawn-via-menu, as: p1, vars: { team: Blue } }
+```
+
+`as` on the use step is the actor for steps that name none, `vars` fills `$team`-style references, `soft`
+and `if` apply to the whole expansion, and step ids read `steps.0.use.spawn-via-menu.1`. A `fragments:` map
+inside a test does the same for that file only. `list_tests` lists the shared fragments.
 
 ## Where does a step run? (context rules in plain words)
 
@@ -159,10 +190,22 @@ Read it in this order:
 3. **`log` events** with the same `stepId` show Output lines from every node captured during the step.
    With `failOnError: true` an `error`-level line on any node fails the active step even if the
    assertion would have passed.
-4. Re-run just the failing slice with `run_steps` (it reuses the session), add `soft: true` to the
-   `expect` to see later steps, or insert a `lua` step that `return`s the state you are unsure about.
+4. **`hint`** (when present) is the daemon's reading of the failure shape: an `expect` that failed
+   instantly after a mutating step suggests `within: 2s` (deferred handlers and replication need a
+   moment); a `player.attribute` / `instance.attribute` whose `actual.set` is `false` on the server
+   suggests `on: client` (the game set the attribute on the client only).
+5. Re-run just the failing slice with `run_steps` (it reuses the live session as it is when you give no
+   `session`), add `soft: true` to the `expect` to see later steps, or insert a `lua` step that `return`s
+   the state you are unsure about: its return value appears in the step table (`→ {"lamps":3}`) without
+   a `save`.
 
-Steps after a hard failure are reported `skipped` with reason `aborted`; teardown still runs.
+Steps after a hard failure are reported `skipped` with reason `aborted`; teardown still runs. Long runs:
+`run_test`/`run_steps` return after 90 s with the report so far and the runId; follow it with
+`tail_run { runId, afterSeq, waitMs: "60s" }` (long-polls until the next event) or `get_run`.
+
+Things Stagehand cannot do, so do not spend runs on them: `input.key code: Escape` (Roblox reserves
+Escape and the other menu keys; close windows through their own buttons or a `game.*` hook), and attributes
+set only on a client are invisible to a server-side condition (use `on: client`).
 
 ## Game hooks vs `lua`
 
@@ -186,9 +229,13 @@ Hooks.server({
 })
 ```
 
-Server hooks receive `(player, params)`; `player` is the `as` actor's Player (or nil). Condition hooks
-work with `wait:` and `expect:`; `lua` conditions use `{ expect: lua, code: "return …" }`, where the code
-sees `actor`, `player`, `character` and `vars`.
+Server hooks receive `(player, params)`; `player` is the `as` actor's Player (or nil). A hook that acts on
+a player should declare `actor = "required"`: it then gets `p1` automatically in a 1-player session and a
+step without `as` is rejected with two or more players, instead of the hook failing at run time with a
+nil player. Condition hooks work with `wait:` and `expect:`; `lua` conditions use
+`{ expect: lua, code: "return …" }`, where the code sees `actor`, `player`, `character` and `vars`.
+Do not name hook params after step modifiers (`label`, `timeout`, …): a playtest could only reach them
+through `with:`, and registration warns.
 
 ## Anti-patterns
 
@@ -203,6 +250,10 @@ sees `actor`, `player`, `character` and `vars`.
 - **Hard-coded instance names for players** (`Workspace.Player1`). Use `@p1.character`.
 - **Teardown that can fail the run.** Make cleanup `soft: true`.
 - **Giant `lua` blocks.** If a `lua` step is more than a few lines, it is a hook waiting to be written.
+- **Unlabeled `lua` steps.** `lua lua as p1` in a report helps nobody; every lua step gets a `label`.
+- **Pasting the same steps into several tests.** Use a fragment (`use:`) so the flow is fixed in one place.
+- **A hook param called `label` or `timeout`.** Flat, it is read as the step modifier; rename it, or pass
+  it under `with:`.
 - **Tests that depend on order.** Each test must pass alone and after any other; fix `reset` instead.
 - **Over-wide selectors.** `Workspace.**.Handle` matches more than you think; prefer explicit paths or
   tags.

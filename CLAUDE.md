@@ -12,6 +12,7 @@ design; `docs/protocol.md`, `docs/spec.md` and `schema/*.json` are the contracts
 | `packages/mcp/` | `stagehand-mcp`: MCP server (stdio) + localhost broker + engine + stores. `src/{broker,engine,spec,server,store}` | TypeScript strict, NodeNext ESM, vitest, ajv, zod |
 | `plugin/` | Studio plugin (Rojo project → `Stagehand.rbxm`). `src/{Node,Runner,Resolve,Conditions,Registry,Launcher,LogCapture}.luau`, `src/Actions/*.luau`, `src/UI/` | Luau, Rojo, Lune tests in `plugin/tests`, selene, stylua |
 | `hooks/` | `stagehand-hooks` Wally package: `Hooks.server{}` / `Hooks.client{}` expose game-specific `game.*` actions through a BindableFunction | Luau |
+| `packages/claude-mod/` | `stagehand-progress`: Claude Code mod (function hooks) that shows runs live in a band, a pane and the status line by polling `get_run`/`tail_run` over the session's MCP connection. Not a pnpm package | `claude plugin validate/test`, tsc against the engine-laid types |
 | `tools/` | `gen-catalog.luau` (Lune) regenerates `schema/catalog.json`; `lib/loader.luau` loads plugin modules outside Studio | Lune |
 | `schema/` | `catalog.json` (all actions/conditions, contexts, params) and `playtest.schema.json` | committed, CI-checked |
 | `examples/` | `place/` sample game (Rojo) and `playtests/*.playtest.yaml` | Rojo |

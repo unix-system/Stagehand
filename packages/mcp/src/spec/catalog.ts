@@ -3,6 +3,7 @@ import type { Context, Role } from "../broker/protocol.js";
 import { createAjv, type AjvError, type AjvInstance } from "./ajv.js";
 import { readSchemaJson } from "./paths.js";
 import { parseSelector, SelectorError } from "./selectors.js";
+import { suggestParam } from "./suggest.js";
 import { isDurationString, varRefName } from "./values.js";
 
 export type JsonSchema = Record<string, unknown>;
@@ -78,9 +79,25 @@ export class Catalog {
     this.live.delete(nodeId);
   }
 
-  /** True once a running game (server/client node) reported its catalog: unknown game.* is then an error. */
+  /**
+   * True while a running game (server/client node) is attached and has reported its catalog: unknown
+   * game.* names and bad hook params are errors then. Between sessions the game.* entries seen last time
+   * stay available for authoring, but only as provisional (warnings): hooks may have changed since.
+   */
   get gameVerified(): boolean {
+    for (const l of this.live.values()) if (l.role !== "edit") return true;
+    return false;
+  }
+
+  /** A game ever reported hooks in this daemon's lifetime (the cache may be non-empty). */
+  get gameEverReported(): boolean {
     return this.gameReported;
+  }
+
+  /** Whether `name` comes from a node attached right now (vs. the cache of a past session). */
+  isLive(name: string): boolean {
+    for (const l of this.live.values()) if (l.entries.some((e) => e.name === name)) return true;
+    return false;
   }
 
   get liveNodeCount(): number {
@@ -160,13 +177,7 @@ export class Catalog {
     for (const [key, value] of Object.entries(params)) {
       const ps = props[key];
       if (!ps) {
-        if (closed) {
-          const allowed = Object.keys(props);
-          errors.push(
-            `unknown param "${key}" for ${entry.name}` +
-              (allowed.length ? ` (allowed: ${allowed.join(", ")})` : " (it takes no params)"),
-          );
-        }
+        if (closed) errors.push(`unknown param "${key}" for ${entry.name}${suggestParam(key, Object.keys(props))}`);
         continue;
       }
       if (varRefName(value)) continue;

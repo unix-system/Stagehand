@@ -10,7 +10,7 @@ import {
   type WireStep,
 } from "../broker/protocol.js";
 import type { Catalog } from "../spec/catalog.js";
-import type { Diagnostic } from "../spec/types.js";
+import type { Diagnostic, Step } from "../spec/types.js";
 import { formatDuration, isTruthy, substituteVars } from "../spec/values.js";
 import type { RunsStore } from "../store/runs.js";
 import { evaluateLogCondition } from "./logs.js";
@@ -28,7 +28,7 @@ import {
 import { pushProgress } from "./progress.js";
 import { Reporter } from "./reporter.js";
 import type { SessionHandle, SessionManager } from "./sessions.js";
-import type { FailureInfo, LogRecord, RunEvent, RunResult, RunStatus, StepRecord } from "./types.js";
+import type { FailureInfo, LogRecord, PartialRunResult, RunEvent, RunResult, RunStatus, StepRecord } from "./types.js";
 import { validateInput } from "./validate.js";
 
 type Outcome = "passed" | "failed" | "cancelled";
@@ -43,6 +43,8 @@ export interface RunRequest {
   timeoutMs?: number;
   /** Require spec.name to equal this (saved tests). */
   expectName?: string;
+  /** Shared fragments (playtests/_shared) for `use:` steps. */
+  sharedFragments?: Record<string, Step[]>;
 }
 
 export interface RunManagerDeps {
@@ -50,8 +52,8 @@ export interface RunManagerDeps {
   catalog: Catalog;
   sessions: SessionManager;
   runs: RunsStore;
-  /** Wait until the live catalogs of these nodes are known (best effort). */
-  awaitCatalogs?: (nodeIds: string[]) => Promise<void>;
+  /** Wait until the live catalogs of these nodes are known (best effort); `force` re-reads them. */
+  awaitCatalogs?: (nodeIds: string[], force?: boolean) => Promise<void>;
   log?: (msg: string) => void;
   /** Delay to collect trailing events/logs before evaluating log conditions or finishing. */
   settleMs?: number;
@@ -71,7 +73,9 @@ export class RunManager {
 
   /** Validate and queue a run. Invalid specs produce a finished run with status "error". */
   start(req: RunRequest): Run {
-    const v = validateInput(req.input, this.deps.catalog, { extraVars: req.extraVars, expectName: req.expectName });
+    const live = this.deps.sessions.current();
+    const liveSession = live && live.state === "ready" ? { mode: live.mode, players: live.players } : null;
+    const v = validateInput(req.input, this.deps.catalog, { extraVars: req.extraVars, expectName: req.expectName, liveSession, sharedFragments: req.sharedFragments });
     const name = v.spec?.name ?? req.fallbackName ?? "invalid";
     const { runId, dir } = this.deps.runs.allocate(name);
     const run = new Run(runId, name, dir, this.deps, req, v.plan, v.errors, v.warnings);
@@ -182,6 +186,8 @@ export class Run {
         target: s.daemon ? "daemon" : targetKey(s.target),
         nodeId: null,
         soft: s.soft,
+        timeoutMs: s.timeoutMs,
+        withinMs: s.withinMs,
         status: "pending",
         durationMs: null,
         startedAt: null,
@@ -309,18 +315,24 @@ export class Run {
           this.stepEvent(rec, "step.cancelled", { durationMs: rec.durationMs, reason: "cancelled" });
           return;
         }
-        rec.reason = typeof ev.reason === "string" ? ev.reason : rec.reason;
-        if ("expected" in ev) rec.expected = ev.expected;
-        if ("actual" in ev) rec.actual = ev.actual;
-        if (ev.error && typeof ev.error === "object") rec.error = ev.error as ErrorObject;
+        // The event may trail the segment result (client events are relayed through the server): only fill
+        // fields the result did not carry, and never emit a second terminal event for the step.
+        if (typeof ev.reason === "string") rec.reason ??= ev.reason;
+        if (ev.expected != null) rec.expected ??= ev.expected;
+        if (ev.actual != null) rec.actual ??= ev.actual;
+        if (ev.error && typeof ev.error === "object") rec.error ??= ev.error as ErrorObject;
         this.setFailed(rec);
-        this.stepEvent(rec, "step.failed", {
-          durationMs: rec.durationMs,
-          reason: rec.reason,
-          expected: rec.expected,
-          actual: rec.actual,
-          error: rec.error,
-        });
+        this.deriveHint(rec);
+        if (!this.emittedTerminal.has(rec.id)) {
+          this.stepEvent(rec, "step.failed", {
+            durationMs: rec.durationMs,
+            reason: rec.reason,
+            expected: rec.expected,
+            actual: rec.actual,
+            error: rec.error,
+            hint: rec.hint,
+          });
+        }
         this.wakeDetails(rec.id);
         return;
       case "step.skipped":
@@ -463,12 +475,14 @@ export class Run {
         reused: this.handle.reused,
       });
 
-      // Re-check against the live catalog (game.* hooks, routing) now that the game is running.
+      // Re-check against the live catalog (game.* hooks, routing) now that the game is running. Hooks may
+      // register after the node attached, so the catalogs are re-read rather than taken from the attach.
       const nodeIds = this.sessionNodeIds();
-      await this.deps.awaitCatalogs?.(nodeIds).catch(() => {});
+      await this.deps.awaitCatalogs?.(nodeIds, true).catch(() => {});
       const re = validateInput(this.req.input, this.deps.catalog, {
         extraVars: this.req.extraVars,
         expectName: this.req.expectName,
+        sharedFragments: this.req.sharedFragments,
       });
       if (!re.ok || !re.plan) {
         this.errors.push(...re.errors);
@@ -692,10 +706,18 @@ export class Run {
       this.failStep(victim.id, e.toObject());
       for (const s of seg.steps) if (s !== victim) this.skipStep(s.id, "aborted");
     }
-    // Give the node's step.failed event (reason/expected/actual) a moment to arrive.
+    // Give the node's step.failed event (reason/expected/actual) a moment to arrive when the result did
+    // not carry them (plugins older than the result-entry fields).
     await Promise.all(
       seg.steps.filter((s) => this.records.get(s.id)?.status === "failed").map((s) => this.waitDetails(s.id, 300)),
     );
+    for (const s of seg.steps) {
+      const rec = this.records.get(s.id);
+      if (rec?.status === "failed" && !this.emittedTerminal.has(rec.id)) {
+        rec.reason ??= rec.error?.message || "step failed (the node sent no reason)";
+        this.stepEvent(rec, "step.failed", { durationMs: rec.durationMs, reason: rec.reason, error: rec.error, origin: "result" });
+      }
+    }
     const failedHard = seg.steps.some((s) => {
       const r = this.records.get(s.id);
       return r?.status === "failed" && !r.soft;
@@ -715,11 +737,19 @@ export class Run {
       if (step?.save && r.value !== undefined) this.vars[step.save] = r.value;
       if (rec.status === "failed") continue;
       if (r.status === "failed") {
+        // Failure details ride on the result (protocol.md "Result"); the step.failed event, which may
+        // arrive later, only fills what is still missing. No placeholder reason: waitDetails() below
+        // keeps waiting for the event while the reason is unknown (older plugins).
+        if (typeof r.reason === "string") rec.reason ??= r.reason;
+        if (r.expected != null) rec.expected ??= r.expected;
+        if (r.actual != null) rec.actual ??= r.actual;
+        if (r.error && typeof r.error === "object") rec.error ??= r.error;
         this.setFailed(rec);
-        rec.reason ??= "step failed";
+        this.deriveHint(rec);
       } else if (r.status === "passed" || r.status === "skipped" || r.status === "cancelled") {
         rec.status = r.status;
         if (r.status === "skipped") rec.skipReason ??= "aborted";
+        if (r.status === "cancelled") rec.skipReason ??= "cancelled";
       }
     }
     if (res.vars && typeof res.vars === "object") Object.assign(this.vars, res.vars);
@@ -730,13 +760,34 @@ export class Run {
         rec.skipReason = "aborted";
       }
       if (!this.emittedTerminal.has(rec.id)) {
+        if (rec.status === "failed" && rec.reason === undefined) continue; // wait for the step.failed event
         this.stepEvent(rec, `step.${rec.status}`, {
           durationMs: rec.durationMs,
           value: rec.value,
           reason: rec.reason ?? rec.skipReason,
+          ...(rec.status === "failed" ? { expected: rec.expected, actual: rec.actual, error: rec.error, hint: rec.hint } : {}),
           origin: "result",
         });
       }
+    }
+  }
+
+  /** A one-line suggestion for the author, from the shape of the failure (F10/F11 in the plan). */
+  private deriveHint(rec: StepRecord): void {
+    if (rec.hint || rec.soft) return;
+    const actual = rec.actual as { set?: unknown } | undefined;
+    if (
+      (rec.name === "player.attribute" || rec.name === "instance.attribute") &&
+      rec.target === "server" &&
+      actual &&
+      typeof actual === "object" &&
+      actual.set === false
+    ) {
+      rec.hint = "the attribute is not set on the server; if the game sets it on the client, add `on: client` to this step";
+      return;
+    }
+    if (rec.verb === "expect" && rec.withinMs == null && rec.error?.code === "ASSERTION_FAILED") {
+      rec.hint = "expect asserts instantly; if the state is set asynchronously (deferred handlers, replication) add `within: 2s` to poll, or use wait:";
     }
   }
 
@@ -831,10 +882,11 @@ export class Run {
         step: rec.id,
         display: rec.display,
         phase: rec.phase,
-        reason: rec.reason ?? "step failed",
+        reason: rec.reason ?? (rec.error?.message || "step failed (the node sent no reason)"),
         expected: rec.expected,
         actual: rec.actual,
         error: rec.error,
+        hint: rec.hint,
         node: rec.nodeId,
         logsAround,
       };
@@ -845,6 +897,42 @@ export class Run {
     }
     if (status === "cancelled") return { step: null, display: null, phase: null, reason: "run cancelled", node: null, logsAround: [] };
     return null;
+  }
+
+  /** What the report would say right now: terminal steps with reasons/values, pending ones as pending. */
+  partialResult(): PartialRunResult {
+    if (this.result) return this.result;
+    const steps = [...this.records.values()];
+    const counts = { passed: 0, failed: 0, skipped: 0, cancelled: 0, pending: 0 };
+    for (const s of steps) counts[(s.status === "running" ? "pending" : s.status) as keyof typeof counts]++;
+    const logCounts = { info: 0, warn: 0, error: 0 };
+    for (const l of this.logs) logCounts[l.level]++;
+    return {
+      runId: this.id,
+      name: this.name,
+      status: this.status,
+      startedAt: this.startedAt.toISOString(),
+      finishedAt: null,
+      durationMs: Date.now() - this.startedAt.getTime(),
+      dir: this.dir,
+      session: this.sessionInfo(),
+      counts,
+      failure: this.failureOrder.length ? this.buildFailure("failed") : null,
+      softFailures: [...this.softFailures],
+      steps,
+      vars: this.vars,
+      errors: this.errors,
+      warnings: this.warnings,
+      logCounts,
+    };
+  }
+
+  private sessionInfo(): RunResult["session"] {
+    return this.handle
+      ? { sessionId: this.handle.sessionId, mode: this.handle.mode, players: this.handle.players, reused: this.handle.reused }
+      : this.plan
+        ? { sessionId: null, mode: this.plan.session.mode, players: this.plan.session.players, reused: false }
+        : null;
   }
 
   private async finish(status: Exclude<RunStatus, "queued" | "running">): Promise<void> {
@@ -873,11 +961,7 @@ export class Run {
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - this.startedAt.getTime(),
       dir: this.dir,
-      session: this.handle
-        ? { sessionId: this.handle.sessionId, mode: this.handle.mode, players: this.handle.players, reused: this.handle.reused }
-        : this.plan
-          ? { sessionId: null, mode: this.plan.session.mode, players: this.plan.session.players, reused: false }
-          : null,
+      session: this.sessionInfo(),
       counts,
       failure: status === "passed" ? null : this.buildFailure(status),
       softFailures: [...this.softFailures],

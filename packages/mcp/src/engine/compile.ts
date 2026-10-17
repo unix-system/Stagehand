@@ -1,7 +1,9 @@
 // Compiler: validated spec -> Plan (actors, context resolution, segment merging, parallel, each, modifiers).
 import type { Actor, Context, Verb } from "../broker/protocol.js";
 import { type Catalog, type CatalogEntry, LOG_CONDITIONS } from "../spec/catalog.js";
+import { ALL_MODIFIERS, COMMON_MODIFIERS } from "../spec/modifiers.js";
 import { formatPath, type PathPart } from "../spec/schema.js";
+import { suggest } from "../spec/suggest.js";
 import type { Diagnostic, PlaytestSpec, SessionSpec, Step } from "../spec/types.js";
 import { collectVarRefs, parseDuration, substituteVars, varRefName } from "../spec/values.js";
 import {
@@ -21,7 +23,14 @@ export const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 export interface CompileOptions {
   /** Extra vars (e.g. run_steps vars) merged over spec.vars. */
   extraVars?: Record<string, unknown>;
+  /** The Studio session that is live right now, for actor hints when the spec says 0 players. */
+  liveSession?: { mode: string; players: number } | null;
+  /** Fragments from playtests/_shared/*.fragment.yaml, by name (the spec's own `fragments:` shadow them). */
+  sharedFragments?: Record<string, Step[]>;
 }
+
+/** Nesting limit for `use:` inside fragments (guards against a fragment using itself). */
+export const MAX_FRAGMENT_DEPTH = 8;
 
 export interface CompileResult {
   plan: Plan | null;
@@ -37,11 +46,10 @@ interface Inherited {
   soft: boolean;
 }
 
-const COMMON_MODS = ["as", "on", "timeout", "soft", "label", "if"];
 const MODIFIERS: Record<"do" | "wait" | "expect", Set<string>> = {
-  do: new Set([...COMMON_MODS, "save", "with"]),
-  wait: new Set([...COMMON_MODS, "with"]),
-  expect: new Set([...COMMON_MODS, "within", "with"]),
+  do: new Set([...COMMON_MODIFIERS, "save", "with"]),
+  wait: new Set([...COMMON_MODIFIERS, "with"]),
+  expect: new Set([...COMMON_MODIFIERS, "within", "with"]),
 };
 
 export function normalizeSession(s: SessionSpec | undefined, errors?: Diagnostic[]): NormalizedSession {
@@ -68,11 +76,18 @@ class Compiler {
   private readonly savedNames = new Set<string>();
   private readonly allSteps: PlanStep[] = [];
 
+  private readonly liveSession: CompileOptions["liveSession"];
+  private readonly fragments: Record<string, Step[]>;
+  /** Fragment names on the current `use:` expansion path (recursion guard). */
+  private readonly useStack: string[] = [];
+
   constructor(
     private readonly spec: PlaytestSpec,
     private readonly catalog: Catalog,
     opts: CompileOptions,
   ) {
+    this.liveSession = opts.liveSession ?? null;
+    this.fragments = { ...(opts.sharedFragments ?? {}), ...(spec.fragments ?? {}) };
     this.session = normalizeSession(spec.session, this.errors);
     this.vars = { ...(spec.vars ?? {}), ...(opts.extraVars ?? {}) };
     for (let i = 1; i <= this.session.players; i++) this.actors[`p${i}`] = i;
@@ -87,7 +102,7 @@ class Compiler {
       }
       this.actors[name] = a.player;
     }
-    for (const phase of ["setup", "steps", "teardown"] as const) collectSaves(spec[phase] ?? [], this.savedNames);
+    for (const phase of ["setup", "steps", "teardown"] as const) collectSaves(spec[phase] ?? [], this.savedNames, this.fragments);
   }
 
   run(): CompileResult {
@@ -172,6 +187,17 @@ class Compiler {
         names = Array.from({ length: this.session.players }, (_, k) => `p${k + 1}`);
       } else names = each.actors;
       const items: Item[] = [];
+      if (names.length > 1) {
+        // vars are run-wide: a save in an each body is overwritten by every later actor.
+        const saved = new Set<string>();
+        collectSaves(each.steps, saved, this.fragments);
+        for (const v of saved) {
+          this.warn(
+            [...parts, "each", "steps"],
+            `save: ${v} inside each runs once per actor (${names.join(", ")}) and the var is run-wide, so later actors overwrite it; read $${v} inside the same iteration or save distinct names`,
+          );
+        }
+      }
       for (const a of names) {
         if (this.actors[a] === undefined) {
           this.err([...parts, "each", "actors"], this.unknownActor(a));
@@ -179,6 +205,33 @@ class Compiler {
         }
         items.push(...this.expandList(each.steps, phase, `${id}.each.${a}`, [...parts, "each", "steps"], { as: a, soft }));
       }
+      if (ifVar) return [{ kind: "group", stepId: id, label, soft, ifVar, children: merge(items) }];
+      return items;
+    }
+    if ("use" in s) {
+      const name = String(s.use);
+      const frag = this.fragments[name];
+      if (!frag) {
+        const known = Object.keys(this.fragments);
+        this.err([...parts, "use"], `unknown fragment "${name}"${known.length ? ` (known: ${known.join(", ")})` : " (define it under fragments: or in playtests/_shared/<name>.fragment.yaml)"}`);
+        return [];
+      }
+      if (this.useStack.includes(name) || this.useStack.length >= MAX_FRAGMENT_DEPTH) {
+        this.err([...parts, "use"], `fragment "${name}" uses itself (${[...this.useStack, name].join(" → ")})`);
+        return [];
+      }
+      // `vars` on the use step are substituted into the fragment's steps now, so one fragment can be
+      // reused with different values; `as` binds the actor for steps that do not name one.
+      const useVars = (s.vars && typeof s.vars === "object" ? s.vars : {}) as Record<string, unknown>;
+      const asName = typeof s.as === "string" ? s.as : inh.as;
+      if (asName && this.actors[asName] === undefined) {
+        this.err([...parts, "as"], this.unknownActor(asName));
+        return [];
+      }
+      const steps = (Object.keys(useVars).length ? substituteVars(frag, useVars) : frag) as Step[];
+      this.useStack.push(name);
+      const items = this.expandList(steps, phase, `${id}.use.${name}`, [...parts, "use"], { as: asName, soft });
+      this.useStack.pop();
       if (ifVar) return [{ kind: "group", stepId: id, label, soft, ifVar, children: merge(items) }];
       return items;
     }
@@ -200,7 +253,13 @@ class Compiler {
 
   private unknownActor(a: string): string {
     const known = Object.keys(this.actors);
-    return `unknown actor "${a}"${known.length ? ` (known: ${known.join(", ")})` : " (session has 0 players)"}`;
+    if (known.length) return `unknown actor "${a}" (known: ${known.join(", ")})`;
+    const live = this.liveSession;
+    const hint =
+      live && live.players > 0
+        ? `; a ${live.mode} session with ${live.players} player(s) is live: omit session or pass players: ${live.players} to use it`
+        : "; set session.players (1 = Play, 2-8 = multiplayer)";
+    return `unknown actor "${a}" (session has 0 players${hint})`;
   }
 
   private compileAtom(
@@ -250,13 +309,22 @@ class Compiler {
         entry = this.catalog.luaEntry("condition");
       } else {
         entry = this.catalog.get(name);
-        if (!entry && name.startsWith("game.")) {
-          if (this.catalog.gameVerified) {
-            this.err([...parts, verb], `unknown game hook "${name}"; the running game did not register it (Hooks.server/Hooks.client)${suggest(name, this.catalog.names())}`);
-            return null;
+        if (name.startsWith("game.") && !this.catalog.gameVerified) {
+          // No game node is attached: a cached entry from a past session may be stale (params renamed,
+          // hook removed), so check it loosely now; the run re-validates once the session is ready.
+          if (entry) {
+            this.warn(
+              [...parts, verb],
+              `game hook "${name}" is known from a previous session only; its params are re-checked against the running game after the session starts`,
+            );
+            entry = { ...this.catalog.provisionalGameEntry(name, entry.kind), contexts: entry.contexts, default: entry.default, actor: entry.actor, summary: entry.summary };
+          } else {
+            this.warn([...parts, verb], `game hook "${name}" cannot be verified until the game is running; it will be checked after the session starts`);
+            entry = this.catalog.provisionalGameEntry(name, kind);
           }
-          this.warn([...parts, verb], `game hook "${name}" cannot be verified until the game is running; it will be checked after the session starts`);
-          entry = this.catalog.provisionalGameEntry(name, kind);
+        } else if (!entry && name.startsWith("game.")) {
+          this.err([...parts, verb], `unknown game hook "${name}"; the running game did not register it (Hooks.server/Hooks.client)${suggest(name, this.catalog.names())}`);
+          return null;
         }
         if (!entry) {
           this.err([...parts, verb], `unknown ${kind} "${name}"${suggest(name, this.catalog.names())}`);
@@ -282,7 +350,19 @@ class Compiler {
       if (!(ref in this.vars) && !this.savedNames.has(ref))
         this.err(parts, `unknown var $${ref} (define it under vars: or save it in an earlier step)`);
     }
-    for (const e of this.catalog.validateParams(entry, params)) this.err(parts, `${name ?? "lua"}: ${e}`);
+    for (const e of this.catalog.validateParams(entry, params)) {
+      // A required param named like a modifier (label, timeout, …) was written flat and eaten as the
+      // modifier: say so instead of "missing required param".
+      const m = /^missing required param "([^"]+)"/.exec(e);
+      if (m && ALL_MODIFIERS.has(m[1]!) && m[1]! in s && !(m[1]! in params)) {
+        this.err(
+          parts,
+          `${name}: param "${m[1]}" collides with the step modifier "${m[1]}" and was read as the modifier; pass it as with: { ${m[1]}: … }`,
+        );
+        continue;
+      }
+      this.err(parts, `${name ?? "lua"}: ${e}`);
+    }
 
     // Context resolution (spec.md rules 1-4).
     const on = typeof s.on === "string" ? (s.on as Context) : null;
@@ -367,9 +447,17 @@ class Compiler {
     const daemon =
       (verb === "wait" || verb === "expect") && !!name && LOG_CONDITIONS.has(name) && (params.scope ?? "all") === "all";
     if (this.errors.length > errCount) return null;
+    // Lua steps read badly as "lua lua as p1": show the code (collapsed) and ask for a label.
+    const isLua = verb === "lua" || name === "lua";
+    if (isLua && label === null) {
+      this.warn(parts, `${verb === "lua" ? "lua" : `${verb}: lua`} step has no label; add label: "<what it does or checks>" so reports and the Studio progress widget read well`);
+    }
+    const suffix = `${actor ? ` as ${actor.name}` : ""}${context !== entry.default ? ` on ${context}` : ""}`;
     const display =
       label ??
-      `${verb} ${name ?? "lua"}${actor ? ` as ${actor.name}` : ""}${context !== entry.default ? ` on ${context}` : ""}`;
+      (isLua
+        ? `${verb === "lua" ? "lua" : `${verb} lua`}: ${collapseCode(String(params.code ?? ""))}${suffix}`
+        : `${verb} ${name}${suffix}`);
     const step: PlanStep = {
       id,
       verb,
@@ -391,6 +479,12 @@ class Compiler {
     this.allSteps.push(step);
     return step;
   }
+}
+
+/** One line of Lua for a display name: whitespace collapsed, `return ` dropped, cut at 48 chars. */
+export function collapseCode(code: string, max = 48): string {
+  const one = code.replace(/\s+/g, " ").trim().replace(/^return\s+/, "");
+  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 
 /** Merge consecutive same-node atoms into segments; `if` and daemon steps stand alone. */
@@ -424,14 +518,18 @@ export function merge(items: Item[]): PlanNode[] {
   return out;
 }
 
-function collectSaves(steps: Step[], out: Set<string>): void {
+function collectSaves(steps: Step[], out: Set<string>, fragments: Record<string, Step[]> = {}, seen = new Set<string>()): void {
   for (const s of steps) {
     if (!s || typeof s !== "object") continue;
     if (typeof s.save === "string") out.add(s.save);
     if (Array.isArray(s.parallel))
-      for (const b of s.parallel as unknown[]) collectSaves((Array.isArray(b) ? b : [b]) as Step[], out);
+      for (const b of s.parallel as unknown[]) collectSaves((Array.isArray(b) ? b : [b]) as Step[], out, fragments, seen);
     if (s.each && typeof s.each === "object" && Array.isArray((s.each as Step).steps))
-      collectSaves((s.each as Step).steps as Step[], out);
+      collectSaves((s.each as Step).steps as Step[], out, fragments, seen);
+    if (typeof s.use === "string" && fragments[s.use] && !seen.has(s.use)) {
+      seen.add(s.use);
+      collectSaves(fragments[s.use]!, out, fragments, seen);
+    }
   }
 }
 
@@ -445,32 +543,3 @@ function dedupe(list: Diagnostic[]): Diagnostic[] {
   });
 }
 
-function suggest(name: string, names: string[]): string {
-  let best: string | null = null;
-  let bestD = Infinity;
-  for (const n of names) {
-    const d = levenshtein(name.toLowerCase(), n.toLowerCase());
-    if (d < bestD) {
-      bestD = d;
-      best = n;
-    }
-  }
-  if (best && bestD <= Math.max(2, Math.floor(name.length / 4))) return ` — did you mean "${best}"?`;
-  const ns = name.split(".")[0];
-  const same = names.filter((n) => n.startsWith(`${ns}.`));
-  return same.length ? ` (${ns}.* has: ${same.join(", ")})` : " (see list_actions)";
-}
-
-function levenshtein(a: string, b: string): number {
-  const dp = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    let prev = dp[0]!;
-    dp[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const tmp = dp[j]!;
-      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = tmp;
-    }
-  }
-  return dp[b.length]!;
-}

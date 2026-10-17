@@ -1,0 +1,6 @@
+{
+  "name": "stagehand",
+  "owner": { "name": "Stagehand" },
+  "description": "Claude Code mods for Stagehand, the declarative Roblox Studio playtest runner.",
+  "plugins": [{ "name": "stagehand-progress", "source": "./" }]
+}

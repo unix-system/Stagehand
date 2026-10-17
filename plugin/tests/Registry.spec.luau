@@ -85,8 +85,14 @@ describe("Registry", function()
 					if req.op == "list" then
 						return {
 							hooks = {
-								{ name = "reset", desc = "Reset the match" },
+								{ name = "reset", desc = "Reset the match", actor = "none" },
 								{ name = "inMatch", kind = "condition" },
+								{
+									name = "giveCoins",
+									actor = "required",
+									params = { type = "object", properties = { amount = { type = "number" } } },
+								},
+								{ name = "odd", actor = "bogus" },
 							},
 						}
 					end
@@ -96,12 +102,17 @@ describe("Registry", function()
 		end
 		local reg = Registry.new("server")
 		local cat = reg:catalog()
-		eq(#cat, #metas + 2)
+		eq(#cat, #metas + 4)
 		local inMatch = reg:get("game.inMatch")
 		eq(inMatch.meta.kind, "condition")
 		eq(inMatch.meta.source, "hook")
 		eq(inMatch.meta.contexts[1], "server")
+		eq(inMatch.meta.actor, "optional") -- not declared → optional
 		eq(reg:get("game.reset").meta.summary, "Reset the match")
+		eq(reg:get("game.reset").meta.actor, "none")
+		eq(reg:get("game.giveCoins").meta.actor, "required")
+		eq(reg:get("game.giveCoins").meta.params.properties.amount.type, "number")
+		eq(reg:get("game.odd").meta.actor, "optional") -- unknown values fall back
 		local ok = inMatch.run({
 			role = "server",
 			player = function()

@@ -7,6 +7,7 @@ import {
   BROKER_VERSION,
   eventsRequestSchema,
   type NodeEvent,
+  PORT_RANGE,
   PROTOCOL_VERSION,
   resultRequestSchema,
   StagehandError,
@@ -40,6 +41,10 @@ export class BrokerServer {
     this.port = opts.port;
   }
 
+  /**
+   * Bind the first free port in [port, port + PORT_RANGE) so several daemons (one per MCP client) can run
+   * at once; the plugin scans the same range. Port 0 means "any free port" (tests).
+   */
   async listen(): Promise<number> {
     const server = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
@@ -50,13 +55,27 @@ export class BrokerServer {
     server.keepAliveTimeout = 30_000;
     server.requestTimeout = 0; // long-polls
     server.headersTimeout = 60_000;
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(this.opts.port, this.opts.host ?? "127.0.0.1", () => {
-        server.off("error", reject);
-        resolve();
-      });
-    });
+    const host = this.opts.host ?? "127.0.0.1";
+    const candidates = this.opts.port === 0 ? [0] : Array.from({ length: PORT_RANGE }, (_, i) => this.opts.port + i);
+    let lastErr: unknown = null;
+    for (const port of candidates) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(port, host, () => {
+            server.off("error", reject);
+            resolve();
+          });
+        });
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") break;
+        this.opts.log?.(`port ${port} is in use; trying ${port + 1}`);
+      }
+    }
+    if (lastErr) throw lastErr;
     this.server = server;
     this.port = (server.address() as AddressInfo).port;
     return this.port;

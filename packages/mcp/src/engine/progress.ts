@@ -15,12 +15,19 @@ export function pushProgress(run: Run, registry: NodeRegistry, intervalMs = PROG
     timer = null;
     if (!ready) return;
     const targets = [registry.findEdit(), ...(sessionId ? registry.clients(sessionId) : [])].filter((n) => n != null);
+    const now = Date.now();
     const steps = run.stepRecords().map((r) => ({
       id: r.id,
       display: r.label ?? r.display,
       target: r.target,
       status: r.status,
+      verb: r.verb,
+      soft: r.soft,
+      timeoutMs: r.timeoutMs,
       ...(r.reason ? { reason: r.reason } : {}),
+      // The widget counts on from elapsedMs with its own clock, so no clock sync is needed.
+      ...(r.status === "running" && r.startedAt != null ? { elapsedMs: now - r.startedAt } : {}),
+      ...(r.durationMs != null ? { durationMs: r.durationMs } : {}),
     }));
     const snapshot = { runId: run.id, name: run.name, status: run.status, total: run.totalSteps, finished: run.finishedSteps, steps };
     for (const n of targets) registry.send(n.nodeId, "progress", snapshot, { timeoutMs: 5_000 }).catch(() => {});
