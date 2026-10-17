@@ -263,7 +263,8 @@ export class Run {
   }
 
   private onRegistry = (e: RegistryEvent): void => {
-    if (e.kind !== "event") return;
+    // Teardown logs/events that arrive while the session is released after the result do not belong to it.
+    if (e.kind !== "event" || this.result) return;
     const ev = e.event;
     const node = e.node;
     if (ev.type === "log") {
@@ -935,15 +936,13 @@ export class Run {
         : null;
   }
 
+  /**
+   * Settle the run the moment its steps are over, then release the session. Ending a non-reused session
+   * (EndTest + Studio teardown) takes seconds and is not part of the test, so the result, `run.finished`
+   * and `done` do not wait for it; the run lock still does, so the next run never races the teardown.
+   */
   private async finish(status: Exclude<RunStatus, "queued" | "running">): Promise<void> {
     this.phaseActive = false;
-    if (this.handle && this.plan) {
-      try {
-        await this.deps.sessions.release(this.handle, this.plan.session.reuse, status === "passed" ? "passed" : "failed");
-      } catch (e) {
-        this.deps.log?.(`session release failed: ${(e as Error).message}`);
-      }
-    }
     const finishedAt = new Date();
     const steps = [...this.records.values()];
     const counts = { passed: 0, failed: 0, skipped: 0, cancelled: 0, pending: 0 };
@@ -980,6 +979,13 @@ export class Run {
       this.deps.log?.(`failed to write report: ${(e as Error).message}`);
     }
     this.resolveDone(result);
+    if (this.handle && this.plan) {
+      try {
+        await this.deps.sessions.release(this.handle, this.plan.session.reuse, status === "passed" ? "passed" : "failed");
+      } catch (e) {
+        this.deps.log?.(`session release failed: ${(e as Error).message}`);
+      }
+    }
   }
 }
 

@@ -245,6 +245,30 @@ describe("runner: blue-team example end to end", () => {
     expect(a.steps.find((s) => s.id === "setup.0")!.status).toBe("passed");
     expect(b.steps.find((s) => s.id === "setup.0")).toMatchObject({ status: "skipped", skipReason: expect.stringMatching(/reused/) });
   });
+
+  it("finishes when the steps are over, without waiting for the session to end; the next run still waits", async () => {
+    // Studio never confirms session.ended, so ending the reuse: false session takes the full 800ms wait.
+    h = await startHarness({ impl: blueWorld(), noSessionEnded: true }, { sessionEndWaitMs: 800 });
+    const spec = BLUE_TEAM.replace("session: { mode: play, players: 1 }", "session: { mode: play, players: 1, reuse: false }");
+    const a = h.daemon.runs.start({ input: spec });
+    const b = h.daemon.runs.start({ input: spec });
+    let bStartedAt = 0;
+    let sessionAtBStart: unknown = "unset";
+    b.on((ev) => {
+      if (ev.type !== "run.started") return;
+      bStartedAt = Date.now();
+      sessionAtBStart = h!.daemon.sessions.current();
+    });
+    const ra = await a.done;
+    const t0 = Date.now();
+    expect(ra.status).toBe("passed");
+    expect(a.status).toBe("passed");
+    expect(h.daemon.sessions.current()).not.toBeNull(); // still ending
+    await b.done;
+    expect(bStartedAt - t0).toBeGreaterThanOrEqual(500);
+    expect(sessionAtBStart).toBeNull();
+    expect(h.studio.ends[0]!.params).toMatchObject({ sessionId: ra.session!.sessionId, result: "passed" });
+  });
 });
 
 describe("runner: control flow", () => {
