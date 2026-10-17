@@ -5,6 +5,8 @@
 	are run from the agent via the daemon.
 ]]
 
+local Config = require(script.Parent.Parent.Config)
+
 local Dock = {}
 Dock.__index = Dock
 
@@ -38,11 +40,7 @@ function Dock.new(plugin: Plugin, nodes: { any }, launcher: any, basePort: numbe
 	local self = setmetatable({ nodes = nodes, launcher = launcher, basePort = basePort, lines = 0 }, Dock)
 
 	local toolbar = plugin:CreateToolbar("Stagehand")
-	local button = toolbar:CreateButton(
-		"Stagehand",
-		"Show the Stagehand dock (daemon status, live log)",
-		"rbxasset://textures/StudioToolbox/AssetPreview/play_icon.png"
-	)
+	local button = toolbar:CreateButton("Stagehand", "Show the Stagehand dock (daemon status, live log)", Config.LOGO)
 	button.ClickableWhenViewportHidden = true
 
 	local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 320, 360, 240, 200)
@@ -67,12 +65,30 @@ function Dock.new(plugin: Plugin, nodes: { any }, launcher: any, basePort: numbe
 	pad.Parent = root
 
 	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0, 80)
+	header.Size = UDim2.new(1, 0, 0, 104)
 	header.BackgroundTransparency = 1
 	header.Parent = root
 	local hl = Instance.new("UIListLayout")
 	hl.SortOrder = Enum.SortOrder.LayoutOrder
 	hl.Parent = header
+
+	local brand = Instance.new("Frame")
+	brand.LayoutOrder = 0
+	brand.Size = UDim2.new(1, 0, 0, 24)
+	brand.BackgroundTransparency = 1
+	brand.Parent = header
+	local logo = Instance.new("ImageLabel")
+	logo.Size = UDim2.fromOffset(20, 20)
+	logo.BackgroundTransparency = 1
+	logo.Image = Config.LOGO
+	logo.ScaleType = Enum.ScaleType.Fit
+	logo.Parent = brand
+	local name = label(brand, "Title", 0, 20)
+	name.Position = UDim2.fromOffset(26, 0)
+	name.Size = UDim2.new(1, -26, 0, 20)
+	name.Font = Enum.Font.SourceSansBold
+	name.TextSize = 16
+	name.Text = "Stagehand"
 
 	self.status = label(header, "Status", 1)
 	self.session = label(header, "Session", 2)
@@ -81,8 +97,8 @@ function Dock.new(plugin: Plugin, nodes: { any }, launcher: any, basePort: numbe
 
 	local log = Instance.new("ScrollingFrame")
 	log.Name = "Log"
-	log.Position = UDim2.fromOffset(0, 84)
-	log.Size = UDim2.new(1, 0, 1, -90)
+	log.Position = UDim2.fromOffset(0, 108)
+	log.Size = UDim2.new(1, 0, 1, -114)
 	log.BackgroundColor3 = themeColor("InputFieldBackground", Color3.fromRGB(37, 37, 37))
 	log.BorderSizePixel = 0
 	log.ScrollBarThickness = 6

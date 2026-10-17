@@ -15,6 +15,7 @@
 	All layout decisions live in ProgressModel (pure, unit-tested); this file only draws them.
 ]]
 
+local Config = require(script.Parent.Parent.Config)
 local Env = require(script.Parent.Parent.Env)
 local Model = require(script.Parent.ProgressModel)
 
@@ -123,12 +124,20 @@ function Progress.new(plugin: Plugin)
 
 	local brand =
 		new("Frame", { Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, LayoutOrder = 1, Parent = head })
+	new("ImageLabel", {
+		Size = UDim2.fromOffset(18, 18),
+		BackgroundTransparency = 1,
+		Image = Config.LOGO,
+		ScaleType = Enum.ScaleType.Fit,
+		Parent = brand,
+	})
 	text({
 		Text = "STAGEHAND",
 		TextSize = 11,
 		TextColor3 = C.muted,
 		Font = Enum.Font.GothamBold,
-		Size = UDim2.fromScale(0.5, 1),
+		Position = UDim2.fromOffset(24, 0),
+		Size = UDim2.new(0.5, -24, 1, 0),
 		Parent = brand,
 	})
 	self.pill = new("TextLabel", {

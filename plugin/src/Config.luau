@@ -17,4 +17,6 @@ return {
 	INPUT_VISUALS = true,
 	-- Cursor glide speed in screen pixels per second; each move is clamped to 0.06–0.22 s.
 	MOUSE_SPEED_PX_S = 4000,
+	-- Uploaded logo image: toolbar button and widget headers.
+	LOGO = "rbxassetid://129273251778096",
 }
