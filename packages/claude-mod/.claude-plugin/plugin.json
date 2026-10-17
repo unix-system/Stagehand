@@ -1,0 +1,39 @@
+{
+  "name": "stagehand-progress",
+  "version": "0.1.0",
+  "description": "Live progress of Stagehand playtests inside Claude Code: a band above the prompt, a detail pane, status line and toasts.",
+  "author": { "name": "Stagehand" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "pollMs": {
+      "type": "number",
+      "title": "Poll interval (ms)",
+      "description": "How often to poll the Stagehand daemon while a run is active.",
+      "default": 600
+    },
+    "autoOpen": {
+      "type": "boolean",
+      "title": "Auto-open pane",
+      "description": "Open the Stagehand pane when a run starts, where it docks beside the transcript (fullscreen).",
+      "default": true
+    },
+    "notify": {
+      "type": "boolean",
+      "title": "Notify on finish",
+      "description": "Raise a native notification when a run finishes.",
+      "default": true
+    },
+    "historySize": {
+      "type": "number",
+      "title": "Recent runs kept",
+      "description": "How many finished runs the pane keeps under Recent.",
+      "default": 5
+    },
+    "logLines": {
+      "type": "number",
+      "title": "Output lines",
+      "description": "How many game log lines the pane's Output section shows.",
+      "default": 8
+    }
+  }
+}
