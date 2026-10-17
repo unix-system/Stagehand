@@ -636,7 +636,7 @@ export function registerTools(server: McpServer, d: Daemon): void {
     {
       title: "Evaluate Luau in Studio",
       description:
-        "Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel.",
+        "Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel. For one-off debugging outside a Stagehand session, prefer a Studio MCP (roblox-assistant, Roblox Studio MCP).",
       inputSchema: {
         code: z.string().describe('Luau chunk, e.g. "return #game.Players:GetPlayers()"'),
         on: z.enum(["edit", "server", "client"]).optional(),
