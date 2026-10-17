@@ -104,6 +104,14 @@ describe("routing for every catalog default context", () => {
     expect(compileOne({ do: "player.respawn" }, { players: 0 }).errors[0]!.message).toMatch(/needs a player/);
   });
 
+  it("lua binds p1 on the server with one player, nobody with two", () => {
+    const one = compileOne({ lua: "return character" }, { players: 1 }).plan!.allSteps[0]!;
+    expect(one.target).toEqual({ role: "server" });
+    expect(one.actor).toEqual({ name: "p1", playerIndex: 1 });
+    expect(compileOne({ lua: "return character" }, { players: 2 }).plan!.allSteps[0]!.actor).toBeNull();
+    expect(compileOne({ lua: "return 1" }, { mode: "edit" }).plan!.allSteps[0]!.actor).toBeNull();
+  });
+
   it("server steps without an actor send actor null", () => {
     const s = compileOne({ do: "instance.set", target: "Lighting", prop: "ClockTime", value: 0 }, { players: 2 }).plan!.allSteps[0]!;
     expect(s.actor).toBeNull();

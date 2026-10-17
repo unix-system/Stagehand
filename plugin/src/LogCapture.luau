@@ -22,6 +22,7 @@ function LogCapture.new()
 		runStart = 1, -- absolute index where the current run started
 		runId = nil,
 		stepId = nil,
+		running = {}, -- step ids in start order, across concurrent segments
 		added = Signal.new(),
 		onLog = nil, -- function(entry) set by Node
 		_conn = nil,
@@ -85,8 +86,20 @@ function LogCapture:push(message: string, level: string)
 	self.added:Fire(entry)
 end
 
-function LogCapture:setStep(stepId: string?)
+--- Mark `stepId` running. Concurrent segments each mark their own step; logs go to the most
+--- recently started one that is still running.
+function LogCapture:setStep(stepId: string)
+	table.insert(self.running, stepId)
 	self.stepId = stepId
+end
+
+--- Mark `stepId` finished.
+function LogCapture:clearStep(stepId: string)
+	local i = table.find(self.running, stepId)
+	if i then
+		table.remove(self.running, i)
+	end
+	self.stepId = self.running[#self.running]
 end
 
 function LogCapture:markRun(runId: string?)

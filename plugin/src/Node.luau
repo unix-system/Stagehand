@@ -23,6 +23,7 @@ Node.__index = Node
 
 Node.PROTOCOL_VERSION = 1
 Node.FLUSH_INTERVAL = 0.05
+Node.SHORT_POLL_INTERVAL = 0.1 -- session nodes: re-poll delay when nothing is queued
 Node.MAX_QUEUE = 5000
 Node.SESSION_QUIET = 1.5 -- seconds without PlayerAdded before session.ready when the count is unknown
 -- Seconds to wait for every player's character once the players are in. Games with a menu flow keep
@@ -272,6 +273,10 @@ end
 function Node:_pollLoop(gen: number)
 	local task = Env.task()
 	local failures = 0
+	-- Session nodes short-poll (docs/protocol.md "Session nodes short-poll"): a Studio game server caps
+	-- concurrent HTTP requests, and held long-polls starved the relayed client traffic.
+	local short = self.role ~= "edit"
+	local query = if short then "&wait=0" else ""
 	while self.running and gen == self._generation do
 		if not self.nodeId then
 			if not self:_attachLoop() then
@@ -279,12 +284,15 @@ function Node:_pollLoop(gen: number)
 			end
 			failures = 0
 		end
-		local status, data, err = self.transport:request("GET", "/poll?node=" .. tostring(self.nodeId))
+		local status, data, err = self.transport:request("GET", "/poll?node=" .. tostring(self.nodeId) .. query)
 		if status == 200 and type(data) == "table" and type(data.command) == "table" then
 			failures = 0
 			self:_dispatch(data.command)
 		elseif status == 204 or status == 200 then
 			failures = 0
+			if short then
+				task.wait(Node.SHORT_POLL_INTERVAL)
+			end
 		elseif status == 410 then
 			self:_reattach("poll: unknown node")
 		else
@@ -639,7 +647,8 @@ end
 
 Node.handlers = handlers
 
-local IMMEDIATE = { cancel = true, ping = true }
+-- Not serialized per type (docs/protocol.md): parallel branches on this node run concurrently.
+local IMMEDIATE = { run_segment = true, cancel = true, ping = true }
 
 function Node:_dispatch(command: any)
 	local task = Env.task()

@@ -163,21 +163,52 @@ describe("broker over HTTP", () => {
     const n = node({ role: "server", sessionId: "s_1", manual: true });
     await n.attach();
     n.start();
-    const first = registry.send(n.nodeId, "run_segment", { segmentId: "seg_1" }, { timeoutMs: 5000 });
-    const c1 = await n.waitForCommand((c) => c.type === "run_segment");
+    const first = registry.send(n.nodeId, "eval", { code: "return 1" }, { timeoutMs: 5000 });
+    const c1 = await n.waitForCommand((c) => c.type === "eval");
     const ctrl = new AbortController();
-    const second = registry.send(n.nodeId, "run_segment", { segmentId: "seg_2" }, { timeoutMs: 5000, signal: ctrl.signal, abortQueuedOnly: true });
-    const cancelP = registry.send(n.nodeId, "cancel", { segmentId: "seg_1" }, { timeoutMs: 5000 });
-    const cc = await n.waitForCommand((c) => c.type === "cancel");
-    expect(n.received.filter((c) => c.type === "run_segment")).toHaveLength(1);
+    const second = registry.send(n.nodeId, "eval", { code: "return 2" }, { timeoutMs: 5000, signal: ctrl.signal, abortQueuedOnly: true });
+    const pingP = registry.send(n.nodeId, "ping", {}, { timeoutMs: 5000 });
+    const pc = await n.waitForCommand((c) => c.type === "ping");
+    expect(n.received.filter((c) => c.type === "eval")).toHaveLength(1);
     ctrl.abort();
     await expect(second).rejects.toMatchObject({ code: "CANCELLED" });
-    await n.result(cc.id, true, { cancelled: ["seg_1"] });
-    await expect(cancelP).resolves.toEqual({ cancelled: ["seg_1"] });
-    await n.result(c1.id, true, { segmentId: "seg_1", status: "cancelled", steps: [] });
-    await expect(first).resolves.toMatchObject({ status: "cancelled" });
+    await n.result(pc.id, true, {});
+    await expect(pingP).resolves.toEqual({});
+    await n.result(c1.id, true, { value: 1, logs: [] });
+    await expect(first).resolves.toMatchObject({ value: 1 });
     await new Promise((r) => setTimeout(r, 100));
-    expect(n.received.filter((c) => c.type === "run_segment")).toHaveLength(1);
+    expect(n.received.filter((c) => c.type === "eval")).toHaveLength(1);
+  });
+
+  it("?wait=0 answers at once: 204 when idle, the command when one is queued", async () => {
+    const n = node({ role: "server", sessionId: "s_1" });
+    await n.attach();
+    const url = (w: string) => `${n.base}/v1/poll?node=${n.nodeId}&wait=${w}`;
+    const t0 = Date.now();
+    expect((await fetch(url("0"))).status).toBe(204);
+    expect(Date.now() - t0).toBeLessThan(150);
+    const sendP = registry.send(n.nodeId, "catalog", {}, { timeoutMs: 1000 });
+    const r = await fetch(url("0"));
+    expect(r.status).toBe(200);
+    const cmd = ((await r.json()) as any).command;
+    expect(cmd.type).toBe("catalog");
+    await n.result(cmd.id, true, { entries: [] });
+    await expect(sendP).resolves.toEqual({ entries: [] });
+    expect((await fetch(url("abc"))).status).toBe(400);
+  });
+
+  it("delivers several run_segments to one node at once (parallel branches on the same node)", async () => {
+    const n = node({ role: "client", sessionId: "s_1", manual: true });
+    await n.attach();
+    n.start();
+    const a = registry.send(n.nodeId, "run_segment", { segmentId: "seg_1" }, { timeoutMs: 5000 });
+    const b = registry.send(n.nodeId, "run_segment", { segmentId: "seg_2" }, { timeoutMs: 5000 });
+    const ca = await n.waitForCommand((c) => c.type === "run_segment" && c.params.segmentId === "seg_1");
+    const cb = await n.waitForCommand((c) => c.type === "run_segment" && c.params.segmentId === "seg_2");
+    await n.result(cb.id, true, { segmentId: "seg_2", status: "passed", steps: [] });
+    await n.result(ca.id, true, { segmentId: "seg_1", status: "passed", steps: [] });
+    await expect(a).resolves.toMatchObject({ segmentId: "seg_1" });
+    await expect(b).resolves.toMatchObject({ segmentId: "seg_2" });
   });
 
   it("events are acked, de-duplicated by seq and forwarded", async () => {

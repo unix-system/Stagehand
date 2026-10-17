@@ -81,8 +81,8 @@ export interface RegistryOptions {
   sweepMs?: number;
 }
 
-/** Commands that are not serialized per type (processed while a run_segment is in flight). */
-const CONCURRENT_TYPES = new Set<CommandType>(["cancel", "ping"]);
+/** Commands that are not serialized per type: parallel branches on one node run their segments concurrently. */
+const CONCURRENT_TYPES = new Set<CommandType>(["run_segment", "cancel", "ping"]);
 
 export class NodeRegistry {
   readonly pollTimeoutMs: number;
@@ -327,10 +327,12 @@ export class NodeRegistry {
   // ---- poll ----------------------------------------------------------------
 
   /**
-   * Register a long-poll. `deliver` is called exactly once with a command or null (timeout).
-   * Throws UNKNOWN_NODE for an unknown node. Returns a cancel function for a closed connection.
+   * Register a long-poll. `deliver` is called exactly once with a command or null (timeout after
+   * `waitMs`, clamped to [0, pollTimeoutMs]; default pollTimeoutMs). Throws UNKNOWN_NODE for an
+   * unknown node. Returns a cancel function for a closed connection.
    */
-  poll(nodeId: string, deliver: (cmd: Command | null) => boolean): () => void {
+  poll(nodeId: string, deliver: (cmd: Command | null) => boolean, waitMs?: number): () => void {
+    const holdMs = Math.min(Math.max(waitMs ?? this.pollTimeoutMs, 0), this.pollTimeoutMs);
     const r = this.touch(nodeId);
     if (r.waiter) {
       // A newer poll supersedes the old one.
@@ -344,7 +346,7 @@ export class NodeRegistry {
         if (r.waiter === waiter) r.waiter = null;
         r.info.lastSeen = Date.now();
         deliver(null);
-      }, this.pollTimeoutMs),
+      }, holdMs),
     };
     r.waiter = waiter;
     this.pump(r);
