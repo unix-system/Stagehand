@@ -169,12 +169,16 @@ function Input.virtual()
 	return vi
 end
 
-local function call(method: string, ...)
+local function try(method: string, ...): (boolean, any)
 	local vi = Input.virtual()
 	local args = table.pack(...)
-	local ok, err = pcall(function()
+	return pcall(function()
 		vi[method](vi, table.unpack(args, 1, args.n))
 	end)
+end
+
+local function call(method: string, ...)
+	local ok, err = try(method, ...)
 	if not ok then
 		Errors.throw("ACTION_ERROR", "VirtualInput:" .. method .. " failed: " .. tostring(err))
 	end
@@ -205,7 +209,8 @@ local function overlay(method: string, ...)
 end
 
 --- Last position VirtualInput was told the mouse is at (Vector2, raw screen pixels). Seeded on
---- first use from the real mouse, else the viewport centre, else (0,0); nil only without Vector2.
+--- first use from the real mouse when it is inside the viewport and below the top bar, else the
+--- viewport centre, else (0,0); nil only without Vector2.
 Input.lastPos = nil
 
 local function initLastPos()
@@ -216,20 +221,35 @@ local function initLastPos()
 	if not V2 then
 		return nil
 	end
+	local ws = Env.service("Workspace")
+	local okVp, vp = pcall(function()
+		return ws.CurrentCamera.ViewportSize
+	end)
+	if not okVp then
+		vp = nil
+	end
+	-- The real mouse of an unfocused client window is often over the top bar (CoreGui), where
+	-- VirtualInput refuses to move: starting the glide there failed the first click of a session.
+	local top = 0
+	local gs = Env.service("GuiService")
+	local okInset, inset = pcall(function()
+		return gs:GetGuiInset()
+	end)
+	if okInset and inset then
+		top = inset.Y
+	end
 	local uis = Env.service("UserInputService")
 	local ok, p = pcall(function()
 		return uis:GetMouseLocation()
 	end)
-	if ok and p and p.X == p.X and p.Y == p.Y then
-		Input.lastPos = V2.new(p.X, p.Y)
-		return Input.lastPos
+	if ok and p and p.X == p.X and p.Y == p.Y and vp then
+		if p.X >= 0 and p.X <= vp.X and p.Y > top and p.Y <= vp.Y then
+			Input.lastPos = V2.new(p.X, p.Y)
+			return Input.lastPos
+		end
 	end
-	local ws = Env.service("Workspace")
-	local ok2, c = pcall(function()
-		return ws.CurrentCamera.ViewportSize / 2
-	end)
-	if ok2 and c then
-		Input.lastPos = V2.new(c.X, c.Y)
+	if vp then
+		Input.lastPos = V2.new(vp.X / 2, vp.Y / 2)
 		return Input.lastPos
 	end
 	Input.lastPos = V2.new(0, 0)
@@ -277,7 +297,9 @@ local FRAME = 1 / 60
 --- Glide the mouse from its last known position to `pos` along a short curve, sending a
 --- SendMousePosition per sample and drawing cursor + trail. Total time ≈ Motion.duration
 --- (0.06–0.22 s); samples are batched per frame when they are denser than 60 Hz. Honours the step
---- budget and cancellation through ctx.frame / ctx.sleep. Ends exactly at `pos`.
+--- budget and cancellation through ctx.frame / ctx.sleep. Ends exactly at `pos`. Samples in between
+--- that VirtualInput rejects (the curve crossing CoreGui: top bar, chat, player list) are drawn but
+--- skipped; only the final position must be reachable.
 function Input.moveTo(ctx, pos)
 	local from = initLastPos()
 	if not Config.INPUT_VISUALS or from == nil then
@@ -300,7 +322,11 @@ function Input.moveTo(ctx, pos)
 	local prev = from
 	for i, s in ipairs(samples) do
 		local v = if i == #samples then pos else V2.new(s.x, s.y)
-		Input.mousePosition(v)
+		if i == #samples then
+			Input.mousePosition(v)
+		else
+			try("SendMousePosition", v)
+		end
 		Input.lastPos = v
 		overlay("trail", prev, v)
 		overlay("cursor", v)

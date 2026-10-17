@@ -16,10 +16,13 @@ local InputOverlay = {}
 InputOverlay.__index = InputOverlay
 
 local GUI_NAME = "StagehandInput"
-local CURSOR_SIZE, CURSOR_DOT = 18, 6
-local IDLE_FADE_AFTER, IDLE_TRANSPARENCY = 1.5, 0.5
+-- Studio's own arrow, drawn at 2x: the 64 px texture has its hotspot (the arrow tip) at the centre.
+local ARROW_IMAGE, ARROW_SIZE = "rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png", 128
+local CURSOR_DOT, HELD_SIZE, PRESS_SCALE = 8, 34, 0.85
+-- Full opacity while in use and for 1 s after, then dimmed; hidden after 5 s without input.
+local ACTIVE_LINGER, IDLE_TRANSPARENCY, HIDE_AFTER = 1, 0.45, 5
 local TRAIL_THICKNESS, TRAIL_FADE, TRAIL_CAP = 3, 0.5, 64
-local CLICK_FROM, CLICK_TO, CLICK_TIME = 12, 40, 0.3
+local PULSE_FROM, PULSE_TO, PULSE_TIME, PULSE_ECHO = 10, 96, 0.55, 0.12
 local KEY_LINGER, TEXT_LINGER = 0.6, 1
 local KEY_LIT, KEY_DIM = 0.1, 0.6
 
@@ -58,7 +61,7 @@ local function corner(r: number): Instance
 	return new("UICorner", { CornerRadius = UDim.new(0, r) })
 end
 
-local function tween(inst: Instance, seconds: number, props: { [string]: any }, onDone: (() -> ())?)
+local function tween(inst: Instance, seconds: number, props: { [string]: any }, onDone: (() -> ())?): Tween?
 	local ts = Env.service("TweenService")
 	local ok, tw = pcall(function()
 		local t = ts:Create(inst, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
@@ -67,8 +70,13 @@ local function tween(inst: Instance, seconds: number, props: { [string]: any }, 
 	end)
 	if ok and tw then
 		if onDone then
-			tw.Completed:Once(onDone)
+			tw.Completed:Once(function(state)
+				if state == Enum.PlaybackState.Completed then
+					onDone()
+				end
+			end)
 		end
+		return tw
 	else
 		for k, v in pairs(props) do
 			pcall(function()
@@ -79,6 +87,7 @@ local function tween(inst: Instance, seconds: number, props: { [string]: any }, 
 			task.delay(seconds, onDone)
 		end
 	end
+	return nil
 end
 
 local function parentGui(gui: ScreenGui): boolean
@@ -104,7 +113,7 @@ local function parentGui(gui: ScreenGui): boolean
 end
 
 local function build()
-	local self = setmetatable({ trails = {}, held = {}, caps = {}, moveTick = 0 }, InputOverlay)
+	local self = setmetatable({ trails = {}, held = {}, caps = {}, moveTick = 0, cursorFades = {} }, InputOverlay)
 	local gui = new("ScreenGui", {
 		Name = GUI_NAME,
 		IgnoreGuiInset = true,
@@ -118,18 +127,18 @@ local function build()
 	end
 	self.gui = gui
 
-	self.cursor = new("Frame", {
+	-- The frame is centred on the hotspot; the arrow image and the dot are centred in it.
+	self.cursorFrame = new("Frame", {
 		Name = "Cursor",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Size = UDim2.fromOffset(CURSOR_SIZE, CURSOR_SIZE),
+		Size = UDim2.fromOffset(ARROW_SIZE, ARROW_SIZE),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Visible = false,
 		ZIndex = 10,
 		Parent = gui,
 	}, {
-		corner(CURSOR_SIZE / 2),
-		new("UIStroke", { Thickness = 1.5, Color = COLORS.cursor, Name = "Ring" }),
+		new("UIScale", { Name = "Scale", Scale = 1 }),
 		new("Frame", {
 			Name = "Dot",
 			AnchorPoint = Vector2.new(0.5, 0.5),
@@ -137,10 +146,21 @@ local function build()
 			Size = UDim2.fromOffset(CURSOR_DOT, CURSOR_DOT),
 			BackgroundColor3 = COLORS.cursor,
 			BorderSizePixel = 0,
+			ZIndex = 10,
 		}, { corner(CURSOR_DOT / 2) }),
+		new("ImageLabel", {
+			Name = "Arrow",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Image = ARROW_IMAGE,
+			ZIndex = 11,
+		}),
 	})
-	self.cursorRing = self.cursor:FindFirstChild("Ring")
-	self.cursorDot = self.cursor:FindFirstChild("Dot")
+	self.cursorArrow = self.cursorFrame:FindFirstChild("Arrow")
+	self.cursorDot = self.cursorFrame:FindFirstChild("Dot")
+	self.cursorScale = self.cursorFrame:FindFirstChild("Scale")
 
 	self.keyStrip = new("Frame", {
 		Name = "Keys",
@@ -181,25 +201,49 @@ function InputOverlay.get()
 	return singleton
 end
 
-local function setCursorAlpha(self, alpha: number, seconds: number)
-	tween(self.cursorRing, seconds, { Transparency = alpha })
-	tween(self.cursorDot, seconds, { BackgroundTransparency = alpha })
+local function stopCursorFade(self)
+	for _, tw in ipairs(self.cursorFades) do
+		pcall(tw.Cancel, tw)
+	end
+	table.clear(self.cursorFades)
 end
 
---- Move the cursor ring to `pos` (screen pixels); it fades to half after 1.5 s idle.
+local function setCursorAlpha(self, alpha: number, seconds: number, onDone: (() -> ())?)
+	stopCursorFade(self)
+	table.insert(self.cursorFades, tween(self.cursorArrow, seconds, { ImageTransparency = alpha }, onDone))
+	table.insert(self.cursorFades, tween(self.cursorDot, seconds, { BackgroundTransparency = alpha }))
+end
+
+--- Mark the cursor in use: shown at full opacity now, dimmed 1 s after the last activity and
+--- hidden 5 s after it. Every move and click calls this, so a busy cursor never fades.
+local function touch(self)
+	stopCursorFade(self)
+	self.cursorFrame.Visible = true
+	self.cursorArrow.ImageTransparency = 0
+	self.cursorDot.BackgroundTransparency = 0
+	self.moveTick += 1
+	local tick = self.moveTick
+	task.delay(ACTIVE_LINGER, function()
+		if self.moveTick == tick and self.cursorFrame and self.cursorFrame.Parent then
+			setCursorAlpha(self, IDLE_TRANSPARENCY, 0.3)
+		end
+	end)
+	task.delay(HIDE_AFTER, function()
+		if self.moveTick == tick and self.cursorFrame and self.cursorFrame.Parent then
+			setCursorAlpha(self, 1, 0.3, function()
+				if self.moveTick == tick then
+					self.cursorFrame.Visible = false
+				end
+			end)
+		end
+	end)
+end
+
+--- Move the cursor to `pos` (screen pixels, the arrow tip).
 function InputOverlay:cursor(pos: Vector2)
 	pcall(function()
-		self.cursor.Position = UDim2.fromOffset(pos.X, pos.Y)
-		self.cursor.Visible = true
-		self.cursorRing.Transparency = 0
-		self.cursorDot.BackgroundTransparency = 0
-		self.moveTick += 1
-		local tick = self.moveTick
-		task.delay(IDLE_FADE_AFTER, function()
-			if self.moveTick == tick and self.cursor and self.cursor.Parent then
-				setCursorAlpha(self, IDLE_TRANSPARENCY, 0.3)
-			end
-		end)
+		self.cursorFrame.Position = UDim2.fromOffset(pos.X, pos.Y)
+		touch(self)
 	end)
 end
 
@@ -252,23 +296,41 @@ local function ring(self, pos: Vector2, color: Color3, size: number, zIndex: num
 	}, { corner(size), new("UIStroke", { Thickness = 2, Color = color, Name = "Ring" }) })
 end
 
---- Button press/release at `pos`. `down` draws an expanding ring and keeps a static one until the
---- matching release.
+--- One outward pulse at `pos`: a ring and a soft disc growing from PULSE_FROM to PULSE_TO while
+--- fading out.
+local function pulse(self, pos: Vector2, color: Color3, delay: number)
+	task.delay(delay, function()
+		pcall(function()
+			local burst = ring(self, pos, color, PULSE_FROM, 8)
+			burst.BackgroundColor3 = color
+			burst.BackgroundTransparency = 0.55
+			local stroke = burst:FindFirstChild("Ring")
+			stroke.Thickness = 3
+			tween(burst, PULSE_TIME, { Size = UDim2.fromOffset(PULSE_TO, PULSE_TO), BackgroundTransparency = 1 })
+			tween(stroke, PULSE_TIME, { Transparency = 1 }, function()
+				pcall(burst.Destroy, burst)
+			end)
+		end)
+	end)
+end
+
+--- Button press/release at `pos`. `down` sends a double pulse outwards, presses the arrow in and
+--- keeps a static ring until the matching release.
 function InputOverlay:click(pos: Vector2, button: string, down: boolean)
 	pcall(function()
 		local color = COLORS[button] or COLORS.Left
+		touch(self)
 		if down then
-			local burst = ring(self, pos, color, CLICK_FROM, 8)
-			tween(burst, CLICK_TIME, { Size = UDim2.fromOffset(CLICK_TO, CLICK_TO) })
-			tween(burst:FindFirstChild("Ring"), CLICK_TIME, { Transparency = 1 }, function()
-				pcall(burst.Destroy, burst)
-			end)
+			pulse(self, pos, color, 0)
+			pulse(self, pos, color, PULSE_ECHO)
+			self.cursorScale.Scale = PRESS_SCALE
 			local prev = self.held[button]
 			if prev then
 				pcall(prev.Destroy, prev)
 			end
-			self.held[button] = ring(self, pos, color, CURSOR_SIZE + 8, 9)
+			self.held[button] = ring(self, pos, color, HELD_SIZE, 9)
 		else
+			tween(self.cursorScale, 0.12, { Scale = 1 })
 			local held = self.held[button]
 			if held then
 				self.held[button] = nil

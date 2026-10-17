@@ -65,14 +65,19 @@ Client nodes show what their `VirtualInput` is doing, so a watcher can follow a 
 (Play has one, Multiplayer one per player). Drawn by `plugin/src/UI/InputOverlay.luau` into a `ScreenGui`
 named `StagehandInput`:
 
-- **Cursor**: an 18 px blue ring with a centre dot at the position last sent to `SendMousePosition`; it
-  fades to half opacity after 1.5 s without movement.
+- **Cursor**: Studio's arrow cursor drawn at 2x (`rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png`,
+  128 px, tip on the position last sent to `SendMousePosition`, with a blue dot under the tip). It is at full
+  opacity while moves and clicks keep coming and for 1 s after the last one, then dims, and it is hidden
+  after 5 s without input.
 - **Motion trail**: `input.click` and `input.mouseMove { position }` no longer teleport the mouse. The
-  cursor glides along a short Bézier curve (`plugin/src/Motion.luau`: bowed 8–18 % off the chord, side
+  cursor glides along a short Bézier curve (`plugin/src/Motion.luau`: bowed 3–7 % off the chord, side
   alternating per move, eased in and out) and each sample leaves a thin segment that fades over 0.5 s.
-  `input.mouseMove { delta }` sends the raw delta and only moves the ring.
-- **Click rings**: a ring that expands 12→40 px on each press (blue for Left, amber for Right, grey for
-  Middle), plus a static ring while the button is held.
+  `input.mouseMove { delta }` sends the raw delta and only moves the cursor. The glide starts from the
+  real mouse only when it is inside the viewport and below the top bar (else the viewport centre), and
+  samples on the way that VirtualInput rejects as CoreGui are skipped; only the target must be reachable.
+- **Click pulse**: each press sends two pulses outwards from the tip (a ring and a soft disc growing
+  10→96 px; blue for Left, amber for Right, grey for Middle), presses the arrow in, and keeps a static
+  ring until the button is released.
 - **Key strip**: key caps along the bottom centre for `input.key` and `input.move` (`W`, `Shift`, `Enter`…),
   lit while held and removed 0.6 s after release; `input.text` shows `⌨ "the text"` for a second.
 
