@@ -45,8 +45,8 @@ describe("Motion.path", function()
 		local p = Motion.path(A, B, { samples = 11 })
 		local mid = p[6]
 		local off = math.abs(side(A, B, mid))
-		truthy(off > 400 * 0.05, "mid point should be off the chord, was " .. off)
-		truthy(off < 400 * 0.18, "bow should stay under 18% of the chord, was " .. off)
+		truthy(off > 400 * 0.02, "mid point should be off the chord, was " .. off)
+		truthy(off < 400 * 0.07, "bow should stay under 7% of the chord, was " .. off)
 		-- every interior point lies on the same side
 		local s = side(A, B, mid) > 0
 		for i = 2, #p - 1 do

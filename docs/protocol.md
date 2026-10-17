@@ -19,7 +19,7 @@ attaches, long-polls for commands, posts results and streams events.
 | Method + path | Direction | Success | Errors |
 |---|---|---|---|
 | `POST /v1/attach` | node → broker | `200` attach response | `400` |
-| `GET /v1/poll?node=<nodeId>` | node → broker | `200 {command}` or `204` after 25 s | `410` unknown node → re-attach |
+| `GET /v1/poll?node=<nodeId>[&wait=<ms>]` | node → broker | `200 {command}` or `204` after 25 s (or `wait` ms) | `410` unknown node → re-attach |
 | `POST /v1/result` | node → broker | `200 {ok:true}` | `404 BAD_REQUEST` unknown commandId (late result after a daemon timeout/cancel; the node ignores it), `410` |
 | `POST /v1/events` | node → broker | `200 {ack:<lastSeq>}` | `410` |
 | `GET /v1/health` | anyone | `200` health | — |
@@ -124,7 +124,19 @@ from evicting each other in a loop.
 
 ```http
 GET /v1/poll?node=n_7
+GET /v1/poll?node=n_7&wait=0
 ```
+
+`wait` (ms, optional) caps how long the broker holds the request open; it is clamped to
+`[0, pollTimeoutMs]` and defaults to `pollTimeoutMs`. `wait=0` answers at once (`200` if a command is
+queued, else `204`).
+
+**Session nodes short-poll.** A game server in a Studio test caps its concurrent HttpService requests
+(measured: with the server's long-poll and one relayed client long-poll open, further requests ran one
+at a time), so long-polls from the server node and the clients it relays starve each other's polls,
+events and results, and commands reached clients seconds late. Server and client nodes therefore poll
+with `wait=0` and re-poll after `100 ms` when nothing is queued (at once after a command). The edit node
+keeps the long-poll.
 
 `200`:
 
@@ -132,14 +144,16 @@ GET /v1/poll?node=n_7
 { "command": { "id": "c_42", "type": "run_segment", "params": { } } }
 ```
 
-`204` (no body) → poll again immediately. The node handles one command at a time per type except `cancel`
-and `ping`, which must be processed while a `run_segment` is in flight (the node runs segments in a
-separate coroutine and keeps polling).
+`204` (no body) → poll again immediately. The node handles one command at a time per type except
+`run_segment`, `cancel` and `ping`, which it processes concurrently (each in its own coroutine, while it
+keeps polling).
 
-**One command per type per node.** The broker enforces this on its side too: it delivers at most one
-in-flight command of each type to a node (a second `run_segment` stays queued until the first one's result
-arrives or times out); `cancel` and `ping` bypass the rule. Parallel branches therefore only run
-concurrently when they target different nodes; branches on the same node run one segment after another.
+**One command per type per node**, except `run_segment`, `cancel` and `ping`. The broker enforces this on
+its side too: it delivers at most one in-flight command of each other type to a node (a second `eval` stays
+queued until the first one's result arrives or times out). Several `run_segment`s may be in flight on one
+node, so parallel branches that target the same node run concurrently (e.g. holding Shift in one branch
+while `input.move` holds W in another). Each segment has its own `segmentId`, vars and cancel flag; a `log`
+event's `stepId` is the most recently started step that is still running on that node.
 
 ## Result
 

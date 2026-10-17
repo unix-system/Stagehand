@@ -281,7 +281,7 @@ End the current Studio test session (EndTest on the server; RunService:Stop via 
 
 ### `eval_lua`
 
-Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel.
+Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel. For one-off debugging outside a Stagehand session, prefer a Studio MCP (roblox-assistant, Roblox Studio MCP).
 
 | Arg | Type | Notes |
 |---|---|---|

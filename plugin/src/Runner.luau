@@ -1,6 +1,7 @@
 --!nonstrict
 --[[
-	Runner — executes one run_segment (docs/protocol.md) sequentially on this node.
+	Runner — executes run_segments (docs/protocol.md) on this node: the steps of one segment in order,
+	several segments concurrently (parallel branches that target the same node).
 
 	Per step: `if` skip → step.started → coerce params → action (with timeout) or condition
 	(signal-first wait; `wait` = until true within timeoutMs, `expect` = instant or within withinMs)
@@ -407,7 +408,7 @@ function Runner:runSegment(params: any): any
 				}
 		end
 		if node.logCapture then
-			node.logCapture:setStep(nil)
+			node.logCapture:clearStep(stepId)
 		end
 		local dur = ms(Env.clock() - t0)
 

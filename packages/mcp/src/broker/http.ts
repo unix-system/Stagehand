@@ -132,6 +132,9 @@ export class BrokerServer {
         case "GET /v1/poll": {
           const nodeId = url.searchParams.get("node");
           if (!nodeId) throw badRequest("missing ?node=");
+          const waitParam = url.searchParams.get("wait");
+          const waitMs = waitParam === null ? undefined : Number(waitParam);
+          if (waitMs !== undefined && !Number.isFinite(waitMs)) throw badRequest("?wait= must be a number of ms");
           let done = false;
           const cancel = this.registry.poll(nodeId, (cmd) => {
             if (done) return false;
@@ -143,7 +146,7 @@ export class BrokerServer {
               res.end();
             }
             return true;
-          });
+          }, waitMs);
           res.on("close", () => {
             if (!done) {
               done = true;

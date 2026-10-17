@@ -13,7 +13,7 @@ export type PathOpts = { samples: number?, seed: number?, bow: number? }
 
 local MIN_SAMPLES, MAX_SAMPLES = 6, 24
 local PX_PER_SAMPLE = 40
-local BOW_MIN, BOW_MAX = 0.08, 0.18 -- control-point offset as a fraction of the chord length
+local BOW_MIN, BOW_MAX = 0.03, 0.07 -- control-point offset as a fraction of the chord length
 local DEFAULT_SPEED = 4000 -- px/s
 local MIN_DURATION, MAX_DURATION = 0.06, 0.22
 

@@ -391,6 +391,9 @@ class Compiler {
       const idx = this.actors[asName];
       if (idx === undefined) this.err([...parts, "as"], this.unknownActor(asName));
       else actor = { name: asName, playerIndex: idx };
+    } else if (entry.actor === "optional" && context !== "edit" && this.session.players === 1) {
+      // One player is unambiguous: bind it so `player`/`character` are set in lua steps on the server.
+      actor = { name: "p1", playerIndex: 1 };
     } else if (entry.actor === "required" && context !== "edit") {
       if (this.session.players === 1) actor = { name: "p1", playerIndex: 1 };
       else if (this.session.players === 0)

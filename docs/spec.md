@@ -115,7 +115,9 @@ Then the target node:
 | `edit` | edit node; actor ignored (warning) | edit node |
 
 Steps that need a player (`player.*`, `character.*`, `input.*`, `gui.*`) require `as` when `players` ≥ 2;
-with `players: 1`, `as` defaults to `p1`.
+with `players: 1`, `as` defaults to `p1`. With `players: 1`, steps where an actor is optional (`lua`, most
+`game.*` hooks) also default to `p1` outside edit mode, so `player` and `character` are set in a server-side
+`lua` step.
 
 ## Selectors
 
