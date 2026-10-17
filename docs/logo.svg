@@ -1,12 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 224" role="img" aria-label="Stagehand">
-  <!-- overhead spotlight -->
-  <rect x="97" y="0" width="6" height="10" fill="#2B2740"/>
-  <polygon points="80,8 120,8 128,32 72,32" fill="#2B2740"/>
-  <polygon points="78,32 122,32 192,204 8,204" fill="#FFD166"/>
-  <ellipse cx="100" cy="204" rx="92" ry="18" fill="#F4B942"/>
-  <ellipse cx="100" cy="204" rx="34" ry="8" fill="#D9A035"/>
-  <!-- the part under test: true isometric cube, edge 42; base hexagon hides face seams -->
-  <polygon points="100,106 136.37,127 136.37,169 100,190 63.63,169 63.63,127" fill="#D7263D"/>
-  <polygon points="100,106 136.37,127 100,148 63.63,127" fill="#E8405A"/>
-  <polygon points="100,148 136.37,127 136.37,169 100,190" fill="#A61B2E"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="Stagehand">
+  <defs><linearGradient id="profile-body" x1="0" y1="-30" x2="0" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#575066"/>
+      <stop offset=".5" stop-color="#302A40"/>
+      <stop offset="1" stop-color="#211D2C"/>
+    </linearGradient></defs>
+  <!-- Original theatrical lantern, enlarged to fill a standalone square mark. -->
+  <g transform="translate(-14 -16) scale(1.5)"><g transform="translate(91 94) rotate(35)">
+    <!-- Rear handle and the far side of the suspension yoke. -->
+    <path d="M-43-18H-55Q-62-18-62-10V10Q-62 18-55 18H-43" stroke="#302A40" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M-30 0V-53Q-30-63-19-63H15Q25-63 25-53V-5" stroke="#211D2C" stroke-width="7" stroke-linecap="round"/>
+    <!-- Stepped cylindrical body and longitudinal cooling ribs. -->
+    <path d="M-44-20Q-50 0-44 20L-17 29H3L12 24H48V-24H12L3-29H-17Z" fill="url(#profile-body)"/>
+    <path d="M-40-14L-17-21H1M-42-3L-18-7H2M-40 10L-18 16H1" stroke="#71697C" stroke-width="3" stroke-linecap="round"/>
+    <path d="M10-23V23" stroke="#191622" stroke-width="6"/>
+    <path d="M18-18H44M18 17H44" stroke="#686073" stroke-width="4" stroke-linecap="round"/>
+    <!-- Near yoke arm and adjustment knob. -->
+    <path d="M-30-52V21Q-30 29-22 29H-11" stroke="#494155" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="-13" cy="9" r="10" fill="#211D2C"/>
+    <circle cx="-13" cy="9" r="4" fill="#918496"/>
+    <!-- Shutter tabs and the broad front lens rim. -->
+    <path d="M28-23L33-37H49L54-23ZM28 23L33 37H49L54 23Z" fill="#302A40"/>
+    <ellipse cx="49" cy="0" rx="17" ry="31" fill="#191622"/>
+    <ellipse cx="51" cy="0" rx="12" ry="25" fill="#F4BC55"/>
+    <ellipse cx="53" cy="0" rx="8" ry="21" fill="#FFF4D4"/>
+    <path d="M55-29L65-25V-12M55 29L65 25V12" stroke="#494155" stroke-width="5" stroke-linecap="round"/>
+  </g></g>
+  <!-- The run symbol sits over the barrel, leaving the lens visible. -->
+  <path transform="translate(-145 -101) scale(1.3)" d="M163 170Q163 166 167 168L211 194Q215 197 211 200L167 226Q163 228 163 224Z" fill="#55CE91" stroke="#24875B" stroke-width="7" stroke-linejoin="round"/>
 </svg>
