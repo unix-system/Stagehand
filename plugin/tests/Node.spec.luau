@@ -202,29 +202,41 @@ describe("Node", function()
 		eq(ev.players[1].userId, 1)
 	end)
 
-	it("server node gives up waiting for characters after CHARACTER_GRACE (menu-driven spawns)", function()
-		Setup.dataModel()
+	-- `character`: what Alice has (nil = no model at all); the graces are shrunk for the test.
+	local function graceCase(sessionId: string, character: any, expectAfter: number, notBefore: number)
 		local Env = H.require(H.src.Env)
-		Env.override({ ["service:Players"] = fakePlayers({ { Name = "Alice", UserId = 1, Character = nil } }) })
+		Env.override({ ["service:Players"] = fakePlayers({ { Name = "Alice", UserId = 1, Character = character } }) })
 		local tr = fakeTransport()
-		local grace = Node.CHARACTER_GRACE
-		Node.CHARACTER_GRACE = 0.4
-		local node = Node.new({ role = "server", transport = tr, sessionId = "s_2", expectedPlayers = 1 })
+		local grace, noGrace = Node.CHARACTER_GRACE, Node.NO_CHARACTER_GRACE
+		Node.CHARACTER_GRACE, Node.NO_CHARACTER_GRACE = 0.8, 0.3
+		local node = Node.new({ role = "server", transport = tr, sessionId = sessionId, expectedPlayers = 1 })
 		local t0 = os.clock()
 		node:start()
-		task.wait(0.2)
+		task.wait(notBefore)
 		eq(sessionReady(tr), nil) -- still inside the grace period
 		truthy(
 			waitFor(function()
 				return sessionReady(tr) ~= nil
-			end, 2),
+			end, 3),
 			"session.ready emitted after the grace period"
 		)
 		node:stop()
-		Node.CHARACTER_GRACE = grace
+		Node.CHARACTER_GRACE, Node.NO_CHARACTER_GRACE = grace, noGrace
 		local ev = sessionReady(tr)
-		truthy(os.clock() - t0 >= 0.4, "waited for the grace period")
+		truthy(os.clock() - t0 >= expectAfter, "waited for the grace period")
 		eq(ev.charactersLoaded, false)
 		eq(ev.players[1].name, "Alice")
+		return os.clock() - t0
+	end
+
+	it("server node gives up after NO_CHARACTER_GRACE when no character exists (menu-driven spawns)", function()
+		Setup.dataModel()
+		local took = graceCase("s_2", nil, 0.3, 0.15)
+		truthy(took < 0.8, "did not wait the full CHARACTER_GRACE")
+	end)
+
+	it("server node waits CHARACTER_GRACE for a character that is still loading", function()
+		local _, Instance = Setup.dataModel()
+		graceCase("s_3", Instance.new("Model"), 0.8, 0.5) -- a model with no Humanoid yet
 	end)
 end)

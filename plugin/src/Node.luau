@@ -30,6 +30,9 @@ Node.SESSION_QUIET = 1.5 -- seconds without PlayerAdded before session.ready whe
 -- players characterless until they pick a team, so after this session.ready goes out anyway with
 -- charactersLoaded = false and tests use `wait: character.loaded` themselves.
 Node.CHARACTER_GRACE = 8
+-- The shorter grace when no player has a character model at all: autoloaded characters appear within
+-- a second or two of joining, so none by now means the game spawns them itself (menu, team pick).
+Node.NO_CHARACTER_GRACE = 2.5
 
 local TERMINAL = { ["step.passed"] = true, ["step.failed"] = true, ["step.skipped"] = true }
 
@@ -429,12 +432,15 @@ end
 
 -- session.ready (server node) ----------------------------------------------------------------
 
-function Node:_playersSnapshot(): ({ any }, boolean)
+--- Returns the player list, whether every character is loaded, and whether any player has a character
+--- model yet (loaded or not).
+function Node:_playersSnapshot(): ({ any }, boolean, boolean)
 	local players = Env.service("Players")
 	local list = Json.array({})
 	local allLoaded = true
+	local anyCharacter = false
 	if not players then
-		return list, true
+		return list, true, false
 	end
 	local autoLoads = true
 	pcall(function()
@@ -442,14 +448,15 @@ function Node:_playersSnapshot(): ({ any }, boolean)
 	end)
 	for _, p in ipairs(players:GetPlayers()) do
 		table.insert(list, Json.ordered({ "name", "userId" }, { name = p.Name, userId = p.UserId }))
-		if autoLoads then
-			local c = p.Character
-			if not (c and c:FindFirstChildOfClass("Humanoid")) then
-				allLoaded = false
-			end
+		local c = p.Character
+		if c then
+			anyCharacter = true
+		end
+		if autoLoads and not (c and c:FindFirstChildOfClass("Humanoid")) then
+			allLoaded = false
 		end
 	end
-	return list, allLoaded
+	return list, allLoaded, anyCharacter
 end
 
 function Node:onPlayersRequested(count: number)
@@ -479,7 +486,7 @@ function Node:_scheduleSessionReady()
 	local enoughSince = nil
 	self._sessionWatcher = task.spawn(function()
 		while self.running do
-			local list, loaded = self:_playersSnapshot()
+			local list, loaded, anyCharacter = self:_playersSnapshot()
 			local enough
 			if self.expectedPlayers then
 				enough = #list >= self.expectedPlayers
@@ -491,7 +498,8 @@ function Node:_scheduleSessionReady()
 			else
 				enoughSince = nil
 			end
-			local gaveUp = enough and not loaded and Env.clock() - enoughSince >= Node.CHARACTER_GRACE
+			local grace = if anyCharacter then Node.CHARACTER_GRACE else Node.NO_CHARACTER_GRACE
+			local gaveUp = enough and not loaded and Env.clock() - enoughSince >= grace
 			local keys = {}
 			for _, p in ipairs(list) do
 				table.insert(keys, tostring(p.userId))
@@ -531,7 +539,8 @@ function handlers.progress(self, params)
 	local ui = self.ui
 	if not ui.progressUI then
 		-- required lazily: Studio-only widget code
-		ui.progressUI = require(script.Parent.UI.Progress).new(self.plugin)
+		-- Only the edit DataModel's widget docks reliably; test DataModels open it from the toolbar.
+		ui.progressUI = require(script.Parent.UI.Progress).new(self.plugin, { autoOpen = self.role == "edit" })
 	end
 	ui.progressUI:update(params, if self.role == "client" then "client#" .. tostring(self.playerIndex) else nil)
 	return Json.object({})
@@ -605,7 +614,7 @@ end
 
 function handlers.end_session(self, params)
 	if self.role == "edit" and self.launcher then
-		return self.launcher:stop(params and params.sessionId)
+		return self.launcher:stop(params and params.sessionId, params and params.abandon == true)
 	end
 	if self.role ~= "server" then
 		Errors.throw("UNKNOWN_COMMAND", "end_session is handled by the server node (edit fallback)")

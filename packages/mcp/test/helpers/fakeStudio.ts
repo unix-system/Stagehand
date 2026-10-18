@@ -44,6 +44,8 @@ export interface FakeStudioOptions {
   noSessionEnded?: boolean;
   /** The edit node's end_session fallback refuses, like the plugin does for Play/multiplayer. */
   editEndRefuses?: boolean;
+  /** Accept this many launches without ever starting them (Studio paused in the background). */
+  launchesNeverStart?: number;
 }
 
 function substitute(v: unknown, vars: Record<string, unknown>): unknown {
@@ -83,11 +85,13 @@ export class FakeStudio {
           }
           this.launches.push(p);
           this.launcher.current = { sessionId: p.sessionId, mode: p.mode, players: p.players, port: this.port, startedAt: Date.now() };
-          setTimeout(() => void this.spawnSession(p.sessionId, p.players), 20);
+          if (this.launches.length > (opts.launchesNeverStart ?? 0)) setTimeout(() => void this.spawnSession(p.sessionId, p.players), 20);
           return { accepted: true };
         },
         end_session: async (p) => {
           this.ends.push({ role: "edit", params: p });
+          // Like the plugin's Launcher: an abandoned launch is forgotten so the next one is accepted.
+          if (p?.abandon && this.launcher.current?.sessionId === p.sessionId) this.launcher.current = null;
           if (opts.editEndRefuses) return { ended: false, via: "RunService.Stop", reason: "Studio is running play test session X, which RunService:Stop() cannot end" };
           await this.killSession();
           return { ended: true, via: "RunService.Stop" };

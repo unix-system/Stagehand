@@ -66,7 +66,7 @@ local function main()
 	local function showStarting(sessionId: string?, detail: string?)
 		local okUi, err = pcall(function()
 			if not ui.progressUI then
-				ui.progressUI = require(script.UI.Progress).new(plugin)
+				ui.progressUI = require(script.UI.Progress).new(plugin, { autoOpen = role == "edit" })
 			end
 			ui.progressUI:starting(sessionId, detail)
 		end)

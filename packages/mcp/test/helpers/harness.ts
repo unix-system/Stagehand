@@ -18,7 +18,13 @@ export interface Harness {
 
 export async function startHarness(
   studioOpts: Partial<FakeStudioOptions> = {},
-  daemonOpts: { idleTimeoutMs?: number; launchTimeoutMs?: number; sessionEndWaitMs?: number; startStudio?: boolean } = {},
+  daemonOpts: {
+    idleTimeoutMs?: number;
+    launchTimeoutMs?: number;
+    startTimeoutMs?: number;
+    sessionEndWaitMs?: number;
+    startStudio?: boolean;
+  } = {},
 ): Promise<Harness> {
   const root = mkdtempSync(path.join(tmpdir(), "stagehand-test-"));
   const daemon = new Daemon({
@@ -28,6 +34,7 @@ export async function startHarness(
     registry: { pollTimeoutMs: 300, expiryMs: 500, sweepMs: 50 },
     sessions: {
       launchTimeoutMs: daemonOpts.launchTimeoutMs ?? 3000,
+      ...(daemonOpts.startTimeoutMs != null ? { startTimeoutMs: daemonOpts.startTimeoutMs } : {}),
       idleTimeoutMs: daemonOpts.idleTimeoutMs ?? 0,
       endTimeoutMs: 1000,
       strayEndSettleMs: 0,

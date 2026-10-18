@@ -191,6 +191,31 @@ describe("session manager", () => {
     expect(h.daemon.sessions.current()).toBeNull();
   });
 
+  it("fails fast when Studio never starts an accepted launch, and the next launch is not blocked", async () => {
+    h = await startHarness({ launchesNeverStart: 1, editEndRefuses: true }, { launchTimeoutMs: 3000, startTimeoutMs: 300 });
+    const sm = h.daemon.sessions;
+    const progress: string[] = [];
+    const t0 = Date.now();
+    await expect(sm.ensure(cfg(1), { onProgress: (m) => progress.push(m) })).rejects.toMatchObject({
+      code: "SESSION_ERROR",
+      message: expect.stringMatching(/did not start test session .* within 0.3s \(no server node attached\)/),
+    });
+    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(progress.some((m) => /still waiting for Studio to start/.test(m))).toBe(true);
+    // the edit node was told to forget the launch, so the Launcher does not refuse the next one
+    expect(h.studio.ends).toEqual([{ role: "edit", params: { sessionId: h.studio.launches[0].sessionId, abandon: true } }]);
+    expect(h.studio.launcher.current).toBeNull();
+    const b = await sm.ensure(cfg(1));
+    expect(b.sessionId).toBe(h.studio.launches[1].sessionId);
+  });
+
+  it("the start bound does not apply once the server node attached", async () => {
+    h = await startHarness({ noSessionReady: true }, { launchTimeoutMs: 600, startTimeoutMs: 100 });
+    await expect(h.daemon.sessions.ensure(cfg(1))).rejects.toMatchObject({ message: expect.stringMatching(/not ready after 0.6s: no session.ready/) });
+    // a server node was attached, so it is ended via EndTest rather than abandoned on the edit node
+    expect(h.studio.ends.map((e) => e.role)).toEqual(["server"]);
+  });
+
   it("fails with SESSION_ERROR without an edit node or when launch is refused", async () => {
     h = await startHarness({}, { startStudio: false });
     await expect(h.daemon.sessions.ensure(cfg(1))).rejects.toMatchObject({ code: "SESSION_ERROR", message: expect.stringMatching(/no Studio edit node/) });

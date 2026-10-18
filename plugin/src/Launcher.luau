@@ -135,7 +135,10 @@ function Launcher:_ended(sessionId: string, ok: boolean, result: any)
 		elapsedMs = math.floor((os.time() - (self.current.startedAt or os.time())) * 1000)
 		self.current = nil
 	end
-	self:_setSetting(nil, nil)
+	-- An abandoned launch can return after a newer one started: leave that one's settings alone.
+	if not self.current then
+		self:_setSetting(nil, nil)
+	end
 	self.last = { sessionId = sessionId, ok = ok, result = result, endedAt = os.time(), elapsedMs = elapsedMs }
 	self.changed:Fire()
 	if ok then
@@ -152,12 +155,29 @@ end
 --- this DataModel); a Play/multiplayer test lives in its own DataModel and ignores it (verified live),
 --- so the daemon relies on EndTest from the test's server node for those. The answer says so honestly
 --- (`ended = false`) instead of claiming the test stopped.
-function Launcher:stop(_sessionId: string?): any
+---
+--- `abandon` (the daemon gave up on a launch whose server node never attached): forget that session so
+--- the next launch_session is not refused for a test Studio may never have started. If Execute*Async
+--- returns later, `_ended` still reports it.
+function Launcher:stop(sessionId: string?, abandon: boolean?): any
 	local current = self.current
+	if abandon and current and current.sessionId == sessionId then
+		self.current = nil
+		self.last = {
+			sessionId = sessionId,
+			ok = false,
+			result = "abandoned: the test never became ready",
+			endedAt = os.time(),
+		}
+		self:_setSetting(nil, nil)
+		self.changed:Fire()
+		warn("[Stagehand] session " .. tostring(sessionId) .. " abandoned: Studio did not start it in time")
+	end
 	if current and current.mode ~= "run" then
 		return {
 			ended = false,
 			via = "RunService.Stop",
+			abandoned = if abandon then true else nil,
 			reason = "Studio is running "
 				.. current.mode
 				.. " test session "

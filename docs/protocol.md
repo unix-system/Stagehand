@@ -53,7 +53,7 @@ Every MCP client runs its own daemon, and several Studio windows may be open, so
   port only (fallback: the `Stagehand.SessionPort` setting). Another daemon never sees those nodes, so it
   cannot end them as strays; Studio runs one test at a time and its `launch_session` fails with
   `SESSION_ERROR "Studio is already running test session … for the daemon on port N"` while another
-  daemon's session is live (the edit node waits up to 6 s for a stopping test first).
+  daemon's session is live (the edit node waits up to 10 s for a stopping test first).
 - A daemon that restarts lands on the same port, so a session it left behind re-attaches to it as a
   stray; before launching it sends `end_session` (EndTest) to that server node and waits for the edit
   node's `session.ended` (up to 20 s). `RunService:Stop()` on the edit node only ends Run mode: a
@@ -178,7 +178,7 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `inspect` | any | `{ "path"?: string, "tag"?: string, "className"?: string, "depth": 1, "limit": 200 }` (exactly one of path/tag/className) | `{ "nodes": [InspectNode…], "truncated": false }` |
 | `eval` | any | `{ "code": string, "env": { "actor"?: Actor, "vars"?: object } }` | `{ "value": any, "logs": [LogEvent…] }` |
 | `launch_session` | edit | `{ "sessionId": string, "mode": "run" \| "play" \| "multiplayer", "players": 0..8 }` | `{ "accepted": true }` (immediately; readiness = `session.ready` event) |
-| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed" }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end |
+| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed", "abandon"?: boolean }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string, "abandoned"?: boolean }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end. `abandon` (edit only): the daemon gave up on a launch whose server node never attached; the Launcher forgets that session (`current` → `null`, `last.result` = `"abandoned: …"`) so the next `launch_session` is not refused for a test Studio may never have started |
 | `launcher_status` | edit | `{}` | `{ "current": { sessionId, mode, players, port, startedAt } \| null, "last": { sessionId, ok, result, endedAt, elapsedMs } \| null }` — what the shared Launcher believes Studio is running (any daemon's test) |
 | `add_players` | server | `{ "count": 1..7 }` | `{ "requested": 1 }` |
 | `ping` | any | `{}` | `{ "pong": true, "t": 1234.5 }` |
@@ -223,7 +223,18 @@ call (in a new thread) `ExecuteRunModeAsync(args)` for `run`, `ExecutePlayModeAs
 `players` from `GetTestArgs().stagehand` to know how many players to wait for before `session.ready`
 (Run mode: 0; without test args it emits after 1.5 s without joins). Run mode simulates inside the edit
 DataModel, so the edit plugin instance also hosts that session's server node. When `Execute*Async`
-returns (test stopped, `EndTest`, or an error) the edit node clears the setting and emits `session.ended`.
+returns (test stopped, `EndTest`, or an error) the edit node clears the setting (unless a newer launch
+owns it) and emits `session.ended`.
+
+The daemon bounds an accepted launch twice: the test's server node must attach within 30 s (Studio
+normally starts a test in 3–6 s; it stalls when paused in the background, behind a modal dialog, or
+while still tearing down the previous test), and `session.ready` must arrive within 60 s; multiplayer
+gets 1.5× both. On either timeout the launch fails with `SESSION_ERROR` and the daemon ends the test
+(`end_session` on the server node, else the edit node with `abandon: true`).
+
+The server node emits `session.ready` once the expected players are in and every character is loaded,
+or after a grace period: 8 s when some character model exists but is still loading, 2.5 s when no
+player has a character at all (the game spawns them itself, e.g. after a menu).
 
 There is no `clear_logs` command. Node-side log buffers (used by node-evaluated `log.*` steps with
 `scope: server|client` and by `eval` logs) are scoped per `runId`: the window starts at the first
@@ -379,7 +390,7 @@ node). Response `{ "ack": 103 }`; the node may drop acknowledged events.
 | type | Emitted by | Extra fields |
 |---|---|---|
 | `node.ready` | node, after attach + catalog built | `role`, `catalogHash` (see below) |
-| `session.ready` | server node, after required players joined and their characters loaded, or 8 s after the players joined when the game does not spawn them (menu flows) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order, `charactersLoaded` (boolean; false after the grace period) |
+| `session.ready` | server node, after required players joined and their characters loaded, or after a grace period when the game does not spawn them (2.5 s with no character at all, e.g. menu flows; 8 s while a character is still loading) | `sessionId`, `players: [{name, userId}]` in `Players:GetPlayers()` order, `charactersLoaded` (boolean; false after the grace period) |
 | `session.ended` | edit node, when `Execute*Async` returns | `sessionId`, `ok` (boolean), `reason` (string), `result?` (string: what `Execute*Async` returned, i.e. the `EndTest` argument when the game or a tool ended the test), `elapsedMs?` (test lifetime) |
 | `segment.started` | node | `runId`, `segmentId` |
 | `segment.finished` | node | `runId`, `segmentId`, `status` |

@@ -83,8 +83,13 @@ end
 Progress.tag = Model.tag
 Progress.summarize = Model.summarize
 
-function Progress.new(plugin: Plugin)
+--- `opts.autoOpen` (default true): open the widget when a session starts and on each new run. Test
+--- DataModels pass false: Studio floats their widgets in the middle of the viewport instead of using the
+--- initial dock state, so there the widget only opens from its toolbar button and Studio restores it
+--- (open, and docked wherever the user put it) on later tests.
+function Progress.new(plugin: Plugin, opts: { autoOpen: boolean? }?)
 	local self = setmetatable({
+		autoOpen = not (opts and opts.autoOpen == false),
 		rows = {}, -- step rows by step index
 		groups = {}, -- group rows by group key
 		runId = nil,
@@ -103,6 +108,20 @@ function Progress.new(plugin: Plugin)
 	self.widget = plugin:CreateDockWidgetPluginGui("StagehandRunProgress", info)
 	self.widget.Title = "Stagehand Progress"
 	self.widget.Name = "StagehandProgress"
+	if not self.autoOpen then
+		pcall(function()
+			local toolbar = plugin:CreateToolbar("Stagehand")
+			local button = toolbar:CreateButton("Progress", "Show Stagehand run progress", Config.LOGO)
+			button.ClickableWhenViewportHidden = true
+			button:SetActive(self.widget.Enabled)
+			button.Click:Connect(function()
+				self.widget.Enabled = not self.widget.Enabled
+			end)
+			self.widget:GetPropertyChangedSignal("Enabled"):Connect(function()
+				button:SetActive(self.widget.Enabled)
+			end)
+		end)
+	end
 
 	local root = new("Frame", {
 		Size = UDim2.fromScale(1, 1),
@@ -676,7 +695,9 @@ function Progress:starting(sessionId: string?, detail: string?)
 	self.pill.TextColor3, self.pill.BackgroundColor3 = C.running, C.running
 	self:_pillPulse(true, C.running)
 	self.bar.Size = UDim2.fromScale(0, 1)
-	self.widget.Enabled = true
+	if self.autoOpen then
+		self.widget.Enabled = true
+	end
 end
 
 --- Apply a progress snapshot. `mine` ("client#N") marks this window's own steps as YOU.
@@ -690,7 +711,9 @@ function Progress:update(snap: any, mine: string?)
 	if snap.runId ~= self.runId then
 		self.runId = snap.runId
 		self.expanded = {} -- user choices are per run
-		self.widget.Enabled = true -- surface each new run; closing it mid-run sticks
+		if self.autoOpen then
+			self.widget.Enabled = true -- surface each new run; closing it mid-run sticks
+		end
 	end
 	self.snapshot = snap
 	self.receivedAt = os.clock()

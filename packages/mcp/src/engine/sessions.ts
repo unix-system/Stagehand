@@ -18,6 +18,8 @@ export function describeSessionEnd(ev: Record<string, unknown>): string {
   return `${base}${tail}${who}`;
 }
 
+const secs = (ms: number): string => `${Number((ms / 1000).toFixed(1))}s`;
+
 export type SessionState = "launching" | "ready" | "resetting" | "ending" | "ended";
 
 export interface SessionRecord {
@@ -46,7 +48,13 @@ export interface SessionHandle {
 
 export interface SessionManagerOptions {
   port: number;
+  /** How long an accepted launch may take to become ready (default 60000; multiplayer gets 1.5x). */
   launchTimeoutMs?: number;
+  /**
+   * How long an accepted launch may take for the test's server node to attach, i.e. for Studio to actually
+   * start the test (default 30000; multiplayer gets 1.5x). Studio usually takes 3-6 s.
+   */
+  startTimeoutMs?: number;
   idleTimeoutMs?: number;
   endTimeoutMs?: number;
   resetTimeoutMs?: number;
@@ -87,6 +95,7 @@ export class SessionManager {
   private readonly unsub: () => void;
   private resetCounter = 0;
   readonly launchTimeoutMs: number;
+  readonly startTimeoutMs: number;
   readonly idleTimeoutMs: number;
   readonly endTimeoutMs: number;
   readonly resetTimeoutMs: number;
@@ -98,7 +107,8 @@ export class SessionManager {
     private readonly registry: NodeRegistry,
     private readonly opts: SessionManagerOptions,
   ) {
-    this.launchTimeoutMs = opts.launchTimeoutMs ?? 120_000;
+    this.launchTimeoutMs = opts.launchTimeoutMs ?? 60_000;
+    this.startTimeoutMs = opts.startTimeoutMs ?? Math.min(30_000, this.launchTimeoutMs);
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
     this.endTimeoutMs = opts.endTimeoutMs ?? 10_000;
     this.resetTimeoutMs = opts.resetTimeoutMs ?? 30_000;
@@ -309,13 +319,14 @@ export class SessionManager {
         await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: 25_000, signal: o.signal });
       }
       accepted = true;
-      await this.waitReady(s, o);
+      await this.waitReady(s, o, true);
     } catch (e) {
       const err = StagehandError.from(e);
       // Only tear down what Studio actually started. A refused launch (Studio busy with another
       // daemon's test) must not reach the edit node's end_session, which would stop that test in
-      // Run mode and clear the Stagehand.Session settings the other daemon wrote.
-      if (accepted) await this.end(`launch failed: ${err.message}`).catch(() => {});
+      // Run mode and clear the Stagehand.Session settings the other daemon wrote. An accepted launch
+      // is abandoned on the edit node, so a test Studio never started cannot block the next launch.
+      if (accepted) await this.end(`launch failed: ${err.message}`, undefined, true).catch(() => {});
       else this.markEnded(s, `launch refused: ${err.message}`);
       throw err.code === "CANCELLED" ? err : new StagehandError("SESSION_ERROR", `session launch failed: ${err.message}`, err.toObject());
     }
@@ -381,13 +392,23 @@ export class SessionManager {
     return problems;
   }
 
-  private waitReady(s: SessionRecord, o: EnsureOptions): Promise<void> {
+  /**
+   * Wait for `s` to become ready, bounded by launchTimeoutMs. `fresh` (a launch this call just made) also
+   * bounds the time until the server node attaches by startTimeoutMs: when Studio never starts the test
+   * (paused in the background, a modal dialog, still tearing down the previous test) the launch fails
+   * fast instead of waiting out the whole budget. Multiplayer gets 1.5x both.
+   */
+  private waitReady(s: SessionRecord, o: EnsureOptions, fresh = false): Promise<void> {
+    const scale = s.mode === "multiplayer" ? 1.5 : 1;
+    const readyMs = Math.round(this.launchTimeoutMs * scale);
+    const startMs = Math.round(this.startTimeoutMs * scale);
     return new Promise<void>((resolve, reject) => {
       let done = false;
+      const timers: NodeJS.Timeout[] = [];
       const finish = (err?: Error) => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
+        for (const t of timers) clearTimeout(t);
         unsub();
         o.signal?.removeEventListener("abort", onAbort);
         if (err) reject(err);
@@ -404,14 +425,35 @@ export class SessionManager {
         }
       };
       const onAbort = () => finish(new StagehandError("CANCELLED", "cancelled while waiting for the session"));
-      const timer = setTimeout(() => {
-        finish(
-          new StagehandError(
-            "SESSION_ERROR",
-            `session ${s.sessionId} not ready after ${Math.round(this.launchTimeoutMs / 1000)}s: ${this.readyProblems(s).join("; ")}`,
-          ),
+      const started = () => this.registry.findServer(s.sessionId) != null;
+      timers.push(
+        setTimeout(() => {
+          finish(
+            new StagehandError(
+              "SESSION_ERROR",
+              `session ${s.sessionId} not ready after ${secs(readyMs)}: ${this.readyProblems(s).join("; ")}`,
+            ),
+          );
+        }, readyMs),
+      );
+      if (fresh && startMs < readyMs) {
+        const nudgeMs = Math.min(10_000, Math.round(startMs / 3));
+        timers.push(
+          setTimeout(() => {
+            if (!started()) o.onProgress?.(`still waiting for Studio to start test ${s.sessionId} (is Studio paused in the background or showing a dialog?)`);
+          }, nudgeMs),
+          setTimeout(() => {
+            if (started()) return;
+            finish(
+              new StagehandError(
+                "SESSION_ERROR",
+                `Studio did not start test session ${s.sessionId} within ${secs(startMs)} (no server node attached). ` +
+                  "Studio may be paused in the background, showing a dialog, or still tearing down the previous test: bring Studio to the front and run again",
+              ),
+            );
+          }, startMs),
         );
-      }, this.launchTimeoutMs);
+      }
       const unsub = this.registry.on(() => check());
       o.signal?.addEventListener("abort", onAbort, { once: true });
       if (o.signal?.aborted) return onAbort();
@@ -463,9 +505,11 @@ export class SessionManager {
   /**
    * End the current session: `end_session` on the server node (EndTest), the edit node as fallback
    * (RunService:Stop(), Run mode only). Waits (bounded by sessionEndWaitMs) for the edit node's
-   * `session.ended` so that a launch right after this does not race Studio's teardown.
+   * `session.ended` so that a launch right after this does not race Studio's teardown. `abandon` (a launch
+   * that never became ready) also tells the edit node to forget the test, so that a test Studio never
+   * started does not make the shared Launcher refuse every later launch.
    */
-  async end(reason = "requested", result?: "passed" | "failed"): Promise<EndResult> {
+  async end(reason = "requested", result?: "passed" | "failed", abandon = false): Promise<EndResult> {
     this.clearIdle();
     const s = this.session;
     if (!s || s.state === "ended") return { ended: false, via: null, sessionId: null, studioStopped: false };
@@ -489,7 +533,8 @@ export class SessionManager {
       const edit = this.registry.findEdit(s.placeId);
       if (edit) {
         try {
-          const r = (await this.registry.send(edit.nodeId, "end_session", params, { timeoutMs: this.endTimeoutMs })) as {
+          const editParams = abandon ? { ...params, abandon: true } : params;
+          const r = (await this.registry.send(edit.nodeId, "end_session", editParams, { timeoutMs: this.endTimeoutMs })) as {
             ended?: boolean;
             via?: string;
             reason?: string;
@@ -505,12 +550,14 @@ export class SessionManager {
       }
     }
     let studioStopped = false;
-    if (via) studioStopped = await confirm.done;
+    // An abandoned launch without a server node may never have started in Studio, so session.ended may
+    // never come: do not hold the failing run for sessionEndWaitMs.
+    if (via && !(abandon && !server)) studioStopped = await confirm.done;
     else confirm.cancel();
     if (!via && !hint) hint = `no node could end session ${s.sessionId} (server node gone, edit fallback failed); stop the test in Studio`;
     this.markEnded(s, reason);
     this.registry.dropSession(s.sessionId, "session ended");
-    if (via && !studioStopped) this.log(`session ${s.sessionId}: Studio did not confirm the end within ${this.sessionEndWaitMs}ms`);
+    if (via && !studioStopped && !(abandon && !server)) this.log(`session ${s.sessionId}: Studio did not confirm the end within ${this.sessionEndWaitMs}ms`);
     return { ended: via !== null, via, sessionId: s.sessionId, studioStopped, ...(hint ? { hint } : {}) };
   }
 
