@@ -24,6 +24,9 @@ Node.__index = Node
 Node.PROTOCOL_VERSION = 1
 Node.FLUSH_INTERVAL = 0.05
 Node.SHORT_POLL_INTERVAL = 0.1 -- session nodes: re-poll delay when nothing is queued
+Node.ACTIVE_WINDOW = 3 -- seconds after a command/result during which session nodes poll at SHORT_POLL_INTERVAL
+Node.IDLE_POLL_INTERVAL = 0.75 -- session nodes: re-poll delay once idle for ACTIVE_WINDOW
+Node.REATTACH_AFTER = 30 -- seconds of continuous poll failures before re-attaching under a new node id
 Node.MAX_QUEUE = 5000
 Node.SESSION_QUIET = 1.5 -- seconds without PlayerAdded before session.ready when the count is unknown
 -- Seconds to wait for every player's character once the players are in. Games with a menu flow keep
@@ -233,6 +236,7 @@ function Node:_attachLoop(): boolean
 	while self.running do
 		local ok, err = self:_attachOnce()
 		if ok then
+			self._lastActivity = Env.clock()
 			-- seq restarts at 1 per attach; unsent events are renumbered after node.ready
 			local pending = self.queue
 			self.seq = 0
@@ -276,6 +280,7 @@ end
 function Node:_pollLoop(gen: number)
 	local task = Env.task()
 	local failures = 0
+	local firstFailure = nil
 	-- Session nodes short-poll (docs/protocol.md "Session nodes short-poll"): a Studio game server caps
 	-- concurrent HTTP requests, and held long-polls starved the relayed client traffic.
 	local short = self.role ~= "edit"
@@ -290,21 +295,31 @@ function Node:_pollLoop(gen: number)
 		local status, data, err = self.transport:request("GET", "/poll?node=" .. tostring(self.nodeId) .. query)
 		if status == 200 and type(data) == "table" and type(data.command) == "table" then
 			failures = 0
+			firstFailure = nil
+			self._lastActivity = Env.clock()
 			self:_dispatch(data.command)
 		elseif status == 204 or status == 200 then
 			failures = 0
+			firstFailure = nil
 			if short then
-				task.wait(Node.SHORT_POLL_INTERVAL)
+				-- Fast while commands are flowing, slow when idle: all session nodes share one game server's
+				-- HttpService budget (500 requests/min), and 10 polls/s per node blew through it mid-run.
+				local idle = Env.clock() - (self._lastActivity or 0) > Node.ACTIVE_WINDOW
+				task.wait(if idle then Node.IDLE_POLL_INTERVAL else Node.SHORT_POLL_INTERVAL)
 			end
 		elseif status == 410 then
 			self:_reattach("poll: unknown node")
 		else
+			-- Transient failures (including HttpService throttling) keep the node id: re-attaching would
+			-- make the daemon cancel the command in flight. Only a sustained outage re-attaches.
 			failures += 1
+			firstFailure = firstFailure or Env.clock()
 			self:_setState(if status == 0 then "connecting" else self.state, err or ("HTTP " .. tostring(status)))
-			if failures >= 3 then
+			if failures >= 3 and Env.clock() - firstFailure >= Node.REATTACH_AFTER then
+				firstFailure = nil
 				self:_reattach("poll failed: " .. tostring(err or status))
 			else
-				task.wait(math.min(0.5 * 2 ^ failures, 10))
+				task.wait(math.min(0.5 * 2 ^ failures, 2))
 			end
 		end
 	end
@@ -365,6 +380,7 @@ function Node:_postResult(commandId: string, ok: boolean, payload: any)
 	else
 		body.error = payload
 	end
+	self._lastActivity = Env.clock()
 	for attempt = 1, 3 do
 		local status = self.transport:request("POST", "/result", body)
 		if status == 200 or status == 404 then

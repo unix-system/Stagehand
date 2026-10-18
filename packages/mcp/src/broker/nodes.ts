@@ -238,7 +238,7 @@ export class NodeRegistry {
     if (prev) {
       playerIndex = prev.info.playerIndex;
       replaced = prev.info.nodeId;
-      this.detach(prev.info.nodeId, "replaced by re-attach", "CANCELLED");
+      this.detach(prev.info.nodeId, "replaced by re-attach; its in-flight and queued commands are lost");
     }
     // A node that reports a session the daemon already ended (e.g. a stale re-attach after 410)
     // is a plain orphan: it keeps no session id, so it is never counted among that session's nodes.

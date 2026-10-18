@@ -214,7 +214,7 @@ export class SessionManager {
         this.registry.dropSession(s.sessionId, `session ended (${why})`);
       }
     } else if (e.kind === "detached" && s && s.state === "ready") {
-      if (e.node.role === "server" && e.node.sessionId === s.sessionId && e.reason !== "replaced by re-attach") {
+      if (e.node.role === "server" && e.node.sessionId === s.sessionId && !e.reason.startsWith("replaced by re-attach")) {
         this.markEnded(s, `server node ${e.reason}`);
       }
     }

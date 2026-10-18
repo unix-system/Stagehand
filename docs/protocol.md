@@ -135,8 +135,12 @@ queued, else `204`).
 (measured: with the server's long-poll and one relayed client long-poll open, further requests ran one
 at a time), so long-polls from the server node and the clients it relays starve each other's polls,
 events and results, and commands reached clients seconds late. Server and client nodes therefore poll
-with `wait=0` and re-poll after `100 ms` when nothing is queued (at once after a command). The edit node
-keeps the long-poll.
+with `wait=0` and re-poll after `100 ms` while commands are flowing (at once after a command; for 3 s after
+the last command or result), then every `750 ms` once idle. The same game server also caps HttpService at
+500 requests/min, which three nodes polling at 10/s exhausted within ~20 s; a throttled request fails like
+a dropped connection. A node therefore keeps its node id through poll failures and re-attaches only after
+30 s of continuous failure or a `410`, because a re-attach makes the daemon fail the old node's in-flight
+commands (`SESSION_ERROR`, "replaced by re-attach"). The edit node keeps the long-poll.
 
 `200`:
 

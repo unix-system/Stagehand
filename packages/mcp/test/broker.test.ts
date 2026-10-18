@@ -253,7 +253,7 @@ describe("broker over HTTP", () => {
     const r = await again.attach();
     expect(r.playerIndex).toBe(1);
     expect(r.nodeId).not.toBe(old);
-    expect(await pending).toMatchObject({ code: "CANCELLED" });
+    expect(await pending).toMatchObject({ code: "SESSION_ERROR", message: expect.stringMatching(/replaced by re-attach/) });
     expect((await c.poll()).status).toBe(410);
   });
 
