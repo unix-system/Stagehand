@@ -18,6 +18,9 @@ export function describeSessionEnd(ev: Record<string, unknown>): string {
   return `${base}${tail}${who}`;
 }
 
+/** launch_session may queue in the plugin behind a test Studio is still closing (Launcher.STOP_GRACE = 20 s). */
+const LAUNCH_COMMAND_TIMEOUT_MS = 35_000;
+
 const secs = (ms: number): string => `${Number((ms / 1000).toFixed(1))}s`;
 
 export type SessionState = "launching" | "ready" | "resetting" | "ending" | "ended";
@@ -307,7 +310,8 @@ export class SessionManager {
       await this.endStrayTests(edit, o.signal);
       const params = { sessionId, mode, players: cfg.players };
       try {
-        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: 25_000, signal: o.signal });
+        // The plugin may queue the launch behind a test Studio is still tearing down (up to its STOP_GRACE).
+        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: LAUNCH_COMMAND_TIMEOUT_MS, signal: o.signal });
       } catch (e) {
         // Studio still tearing down a test of OURS (just stopped, or left behind): wait for the edit node
         // to report it ended, then try once more. Another daemon's test is refused as before.
@@ -316,7 +320,7 @@ export class SessionManager {
         if (!ours || o.signal?.aborted) throw e;
         o.onProgress?.(`Studio is still ending our previous test ${m[1]}; waiting for it`);
         await this.waitSessionEnded(new Set([m[1]!]), this.sessionEndWaitMs).done;
-        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: 25_000, signal: o.signal });
+        await this.registry.send(edit.nodeId, "launch_session", params, { timeoutMs: LAUNCH_COMMAND_TIMEOUT_MS, signal: o.signal });
       }
       accepted = true;
       await this.waitReady(s, o, true);

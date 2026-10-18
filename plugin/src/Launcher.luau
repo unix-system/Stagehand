@@ -24,7 +24,8 @@ Launcher.__index = Launcher
 
 Launcher.SETTING = "Stagehand.Session"
 Launcher.SETTING_PORT = "Stagehand.SessionPort"
-Launcher.STOP_GRACE = 10 -- seconds to wait for a stopping test before launch_session fails
+Launcher.STOP_GRACE = 20 -- seconds to queue behind a stopping test before launch_session fails
+Launcher.BREATHER = 1 -- seconds Studio is left alone after a test ends before the next one starts
 
 function Launcher.new(opts: {
 	plugin: any,
@@ -38,6 +39,7 @@ function Launcher.new(opts: {
 		current = nil, -- { sessionId, mode, players, port, startedAt }
 		last = nil, -- { sessionId, ok, result, endedAt }
 		changed = Signal.new(),
+		settleUntil = 0, -- Env.clock() before which Studio is still settling after a test ended
 	}, Launcher)
 end
 
@@ -75,11 +77,18 @@ function Launcher:launch(params: { [string]: any }, port: number?, transport: an
 		return okRunning and running == true
 	end
 	-- A test that was just ended (stray from a restarted daemon, EndTest, Stop) takes Studio a few
-	-- seconds to tear down; wait for that instead of failing on the race.
+	-- seconds to tear down; Execute*Async called meanwhile can wait forever. Queue the launch until Studio
+	-- is idle (no current test, not running, BREATHER seconds past the last end) instead of racing it.
 	local task = Env.task()
 	local waitStart = Env.clock()
-	while (self.current or studioRunning()) and Env.clock() - waitStart < Launcher.STOP_GRACE do
-		task.wait(0.25)
+	local function busy(): boolean
+		return self.current ~= nil or studioRunning() or Env.clock() < self.settleUntil
+	end
+	if busy() then
+		print("[Stagehand] Studio is still finishing the previous test; queueing session " .. sessionId)
+	end
+	while busy() and Env.clock() - waitStart < Launcher.STOP_GRACE do
+		task.wait(0.1)
 	end
 	if self.current then
 		Errors.throw(
@@ -137,6 +146,7 @@ function Launcher:_ended(sessionId: string, ok: boolean, result: any)
 	end
 	-- An abandoned launch can return after a newer one started: leave that one's settings alone.
 	if not self.current then
+		self.settleUntil = Env.clock() + Launcher.BREATHER
 		self:_setSetting(nil, nil)
 	end
 	self.last = { sessionId = sessionId, ok = ok, result = result, endedAt = os.time(), elapsedMs = elapsedMs }
@@ -190,6 +200,7 @@ function Launcher:stop(sessionId: string?, abandon: boolean?): any
 		rs:Stop()
 	end)
 	self:_setSetting(nil, nil)
+	self.settleUntil = Env.clock() + Launcher.BREATHER
 	if not ok then
 		Errors.throw("SESSION_ERROR", "RunService:Stop() failed: " .. tostring(err))
 	end
