@@ -4,7 +4,7 @@
 (the first free port in `127.0.0.1:38491`–`38500`; `STAGEHAND_PORT` moves the range start). Several MCP
 clients can run their own daemons at once, each sees every open Studio, and `--place` picks which Studio a
 daemon drives when more than one is open. Tool names come from
-[architecture.md](architecture.md#mcp-surface-packagesmcpsrcserver).
+[architecture.md](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#mcp-surface-packagesmcpsrcserver).
 
 > The tool reference below is generated from `packages/mcp/src/server/tools.ts`. When in doubt, trust the
 > tool's own input schema as listed by your MCP client.
@@ -69,7 +69,7 @@ above the prompt with the running step and its budget, a `/stagehand` pane with 
 tail and a Cancel button, the status line, and a toast plus native notification on finish. It needs nothing
 from the daemon beyond `get_run format:"json"` and `tail_run`, which it calls over the session's own MCP
 connection. Load it with `claude --plugin-dir packages/claude-mod` (details in
-[`packages/claude-mod/README.md`](../packages/claude-mod/README.md)).
+[`packages/claude-mod/README.md`](https://github.com/unix-system/Stagehand/blob/main/packages/claude-mod/README.md)).
 
 ## Recommended agent workflow
 
@@ -100,15 +100,15 @@ client lists is authoritative). `?` = optional. Durations accept `"10s"`, `"500m
 | [`inspect`](#inspect) | Inspect instances in the live DataModel to discover paths for selectors: remotes, teams, tools, GUI elements, tagged parts, attributes. |
 | [`validate_test`](#validate_test) | Validate a playtest (YAML/JSON text, object, or a saved test by name) against the schema and the action catalog without running it. |
 | [`run_steps`](#run_steps) | Run unsaved steps in Studio right away (reuses the live session as it is when no mode/players are given) and return a pass/fail report with reason/expected/actual, lua return values and vars; bounded wait (default 90s) with a partial report past it. |
-| [`run_test`](#run_test) | Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars); bounded wait. |
+| [`run_test`](#run_test) | Run a saved playtest from playtests/&lt;name&gt;.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars); bounded wait. |
 | [`run_suite`](#run_suite) | Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests); bounded by `timeout`. |
 | [`get_run`](#get_run) | Get the result of a run by runId (or "latest"): status, failure (step, reason, expected, actual, hint, node, logs around), per-step statuses with reasons and values, final vars. Works for in-progress runs. |
 | [`tail_run`](#tail_run) | Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished); `waitMs` long-polls. |
 | [`cancel_run`](#cancel_run) | Cancel a queued or running run (default: the active run). |
 | [`list_tests`](#list_tests) | List saved playtests in playtests/ with description and tags, plus the shared fragments in playtests/_shared/. |
 | [`get_test`](#get_test) | Return the YAML source of a saved playtest. |
-| [`save_test`](#save_test) | Validate and save a playtest to playtests/<name>.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). |
-| [`delete_test`](#delete_test) | Delete a saved playtest (playtests/<name>.playtest.yaml). |
+| [`save_test`](#save_test) | Validate and save a playtest to playtests/&lt;name&gt;.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). |
+| [`delete_test`](#delete_test) | Delete a saved playtest (playtests/&lt;name&gt;.playtest.yaml). |
 | [`start_session`](#start_session) | Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). |
 | [`stop_session`](#stop_session) | End the current Studio test session and wait for Studio to confirm; also ends a test this daemon launched but lost track of. |
 | [`eval_lua`](#eval_lua) | Run arbitrary Luau on a node and return its value and captured logs. |
@@ -179,7 +179,7 @@ section lists the saved vars, and a failure carries a one-line **Hint** when the
 
 ### `run_test`
 
-Run a saved playtest from playtests/<name>.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars). Reports are stored under .stagehand/runs/. Waits up to 90s by default, then returns the partial report with the runId to follow via tail_run/get_run; wait: false returns the runId at once.
+Run a saved playtest from playtests/&lt;name&gt;.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars). Reports are stored under .stagehand/runs/. Waits up to 90s by default, then returns the partial report with the runId to follow via tail_run/get_run; wait: false returns the runId at once.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -245,7 +245,7 @@ Return the YAML source of a saved playtest.
 
 ### `save_test`
 
-Validate and save a playtest to playtests/<name>.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). The spec's name must equal `name`. Refuses invalid specs unless force: true. Overwrites an existing test.
+Validate and save a playtest to playtests/&lt;name&gt;.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). The spec's name must equal `name`. Refuses invalid specs unless force: true. Overwrites an existing test.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -255,7 +255,7 @@ Validate and save a playtest to playtests/<name>.playtest.yaml (YAML text is sav
 
 ### `delete_test`
 
-Delete a saved playtest (playtests/<name>.playtest.yaml). Past run reports are kept.
+Delete a saved playtest (playtests/&lt;name&gt;.playtest.yaml). Past run reports are kept.
 
 | Arg | Type | Notes |
 |---|---|---|

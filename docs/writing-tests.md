@@ -1,9 +1,9 @@
 # Writing playtests
 
 A practical guide for people and agents. The formal rules live in [spec.md](spec.md); the action and
-condition list lives in [`schema/catalog.json`](../schema/catalog.json) (or the `list_actions` MCP tool).
-Every example here runs against the sample game in [`examples/place`](../examples/place) and the specs in
-[`examples/playtests`](../examples/playtests).
+condition list lives in [`schema/catalog.json`](https://github.com/unix-system/Stagehand/blob/main/schema/catalog.json) (or the `list_actions` MCP tool).
+Every example here runs against the sample game in [`examples/place`](https://github.com/unix-system/Stagehand/tree/main/examples/place) and the specs in
+[`examples/playtests`](https://github.com/unix-system/Stagehand/tree/main/examples/playtests).
 
 ## Mental model: do, wait, expect
 
@@ -145,7 +145,7 @@ steps:
       - { do: character.equipTool, as: p2, tool: Gun }
 ```
 
-See [`two-players-spawn.playtest.yaml`](../examples/playtests/two-players-spawn.playtest.yaml).
+See [`two-players-spawn.playtest.yaml`](https://github.com/unix-system/Stagehand/blob/main/examples/playtests/two-players-spawn.playtest.yaml).
 
 ## Session reuse and reset
 
@@ -219,7 +219,7 @@ set only on a client are invisible to a server-side condition (use `on: client`)
 Hooks run inside the game's own module state (the plugin calls them through a BindableFunction), so
 `require` sees the same tables the game uses. A `lua` step runs in plugin identity, where `require` of a
 game module returns a *separate* copy. The example place registers hooks in
-[`StagehandBindings.server.luau`](../examples/place/src/server/StagehandBindings.server.luau):
+[`StagehandBindings.server.luau`](https://github.com/unix-system/Stagehand/blob/main/examples/place/src/server/StagehandBindings.server.luau):
 
 ```lua
 Hooks.server({

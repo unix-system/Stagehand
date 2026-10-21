@@ -123,7 +123,7 @@ toolbar there once and dock it where you like; Studio restores it on later tests
 
 Whether plugin nodes really load in simulated **client** DataModels (and a few other platform facts) must
 be confirmed by hand in Studio. Record your results in the
-[Phase 0 spike checklist](architecture.md#phase-0-spike-checklist). If client nodes do not load, Stagehand
+[Phase 0 spike checklist](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#phase-0-spike-checklist). If client nodes do not load, Stagehand
 falls back to an injected client runtime behind the same protocol.
 
 ## Troubleshooting

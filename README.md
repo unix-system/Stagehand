@@ -49,6 +49,13 @@ steps:
 
 ## Docs
 
+Visit the [Stagehand documentation site](https://unix-system.github.io/Stagehand/) for the quickstart,
+guides, and searchable action reference.
+
+To work on the site locally, run `pnpm docs:dev`. Use `pnpm docs:test` and `pnpm docs:build`
+to validate it, then `pnpm docs:preview` to preview the production build. Reference pages are
+generated from `schema/catalog.json`; edit the catalog's source metadata rather than generated pages.
+
 - [Writing tests](docs/writing-tests.md)
 - [MCP server and tools](docs/mcp.md)
 - [Studio plugin](docs/plugin.md)

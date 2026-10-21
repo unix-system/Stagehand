@@ -4,10 +4,19 @@
   "description": "Declarative, agent-driven playtests for Roblox Studio",
   "license": "MIT",
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
-    "lint": "pnpm -r --if-present lint"
+    "lint": "pnpm -r --if-present lint",
+    "docs:dev": "node tools/docs-catalog.mjs && vitepress dev docs",
+    "docs:build": "node tools/docs-catalog.mjs && vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "docs:test": "node --test tools/docs-catalog.test.mjs"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
   }
 }

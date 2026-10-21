@@ -6,3 +6,6 @@ coverage/
 plugin/build/*.rbxm
 .DS_Store
 *.bak
+docs/.vitepress/cache/
+docs/reference/
+docs/public/logo.svg
