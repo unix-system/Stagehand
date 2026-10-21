@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const language = JSON.parse(await readFile(path.join(root, 'docs/.vitepress/catalog-language.json'), 'utf8'));
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 export const escapeText = (value) => String(value).replace(/[&<>"'`|{}\[\]*_\\]/g,
   c => `&#${c.codePointAt(0)};`).replace(/\r?\n/g, '<br>');
@@ -28,9 +29,11 @@ export function renderCatalog(catalog) {
   let index = '# Actions and conditions\n\nThis reference is generated from the built-in catalog. Use actions with `do`, and conditions with `wait` or `expect`. Live `game.*` hooks are discovered by `list_actions`; see the [game-hooks guide](../game-hooks.md).\n\n';
   for (const [namespace, entries] of groups) {
     index += `- [${namespace}](${namespace}.md) — ${entries.length} entries\n`;
-    let page = `# ${namespace}\n\nBuilt-in actions and conditions in the ${namespace} namespace.\n\n`;
+    let page = `# ${namespace}\n\nThis page lists built-in actions and conditions in the ${namespace} namespace.\n\n`;
     for (const e of entries) {
-      page += `## ${e.name} {#${e.name.toLowerCase().replace('.', '-')}}\n\n${escapeText(e.summary ?? '')}\n\n`;
+      const wording = language[e.name];
+      if (wording && wording.source !== e.summary) throw new Error(`Review reference wording after catalog change: ${e.name}`);
+      page += `## ${e.name} {#${e.name.toLowerCase().replace('.', '-')}}\n\n${escapeText(wording?.summary ?? e.summary ?? '')}\n\n`;
       page += `**Kind:** ${escapeText(e.kind)} · **Contexts:** ${escapeText(e.contexts.join(', '))} · **Default:** ${escapeText(e.default)} · **Actor:** ${escapeText(e.actor ?? 'optional')}\n\n`;
       const properties = Object.entries(e.params?.properties ?? {}).sort(([a], [b]) => compare(a, b));
       if (properties.length) {
@@ -42,7 +45,14 @@ export function renderCatalog(catalog) {
       } else page += 'No named parameters.\n\n';
       if (e.params) page += `::: details Complete parameter schema and constraints\n${jsonBlock(e.params)}\n:::\n\n`;
       if (e.returns !== undefined) page += `### Return value\n\nUse \`save\` to store the result.\n\n${jsonBlock(e.returns)}\n\n`;
-      if (e.notes) page += `**Notes:** ${escapeText(typeof e.notes === 'string' ? e.notes : JSON.stringify(e.notes))}\n\n`;
+      if (e.notes) {
+        const notes = e.notes === 'Uses the step `timeout` as its budget; no timeout param.'
+          ? 'This action uses the step timeout. It has no separate timeout parameter.'
+          : e.notes === 'Escape and other keys Roblox reserves never reach the game; drive menus with gui.click or a game.* hook.'
+            ? 'Roblox reserves Escape and other menu keys. These keys do not reach the game. Use gui.click or a game hook for menus.'
+            : typeof e.notes === 'string' ? e.notes : JSON.stringify(e.notes);
+        page += `**Notes:** ${escapeText(notes)}\n\n`;
+      }
     }
     pages.set(`${namespace}.md`, page);
   }

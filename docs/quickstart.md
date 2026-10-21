@@ -1,6 +1,6 @@
 # Your first playtest
 
-Build Stagehand, connect your coding agent, and run a playtest against the included sample game.
+Use this guide to install Stagehand and run a test in the sample game.
 
 ## Prerequisites
 
@@ -20,41 +20,46 @@ rojo build plugin -o Stagehand.rbxm
 rojo build examples/place -o StagehandExample.rbxl
 ```
 
-The MCP entry point is `packages/mcp/dist/index.js`. In Studio, open **Plugins → Plugins Folder** and copy `Stagehand.rbxm` into that folder. Restart Studio, then open `StagehandExample.rbxl`.
+The MCP entry point is `packages/mcp/dist/index.js`.
 
-The sample place already includes the game hooks and tools used by the example tests. You do not need to install Wally packages for this sample.
+1. In Studio, open **Plugins → Plugins Folder**.
+2. Copy `Stagehand.rbxm` into that folder.
+3. Restart Studio.
+4. Open `StagehandExample.rbxl`.
+
+The sample place includes the hooks and tools for the example tests. This sample does not need Wally packages.
 
 ## 2. Connect your coding agent
 
-Register Stagehand from the directory where you use your agent. Replace both paths below with absolute paths to your checkout:
+Register Stagehand from your agent's project directory. Replace the two example paths with absolute paths to your local repository:
 
 ```sh
 claude mcp add stagehand -- node /absolute/path/Stagehand/packages/mcp/dist/index.js --root /absolute/path/Stagehand/examples
 ```
 
-On Windows, quote paths containing spaces; forward slashes work for Node paths, such as `"C:/Users/you/Projects/Stagehand/examples"`.
+On Windows, put quotation marks around paths that contain spaces. Node accepts forward slashes, for example `"C:/Users/you/Projects/Stagehand/examples"`.
 
-Restart or reconnect your agent's MCP session after registration. The `--root` directory contains the `playtests/` folder; use `examples` for this walkthrough, not the repository root.
+After registration, restart your agent's MCP session. Set `--root` to the `examples` directory for this procedure. Stagehand looks for `playtests/` in that directory.
 
-When Studio requests permission for the plugin to access localhost, allow it. The daemon uses the first free port in its configured localhost range; `stagehand_status` reports the selected port. See [plugin setup](plugin.md) if the connection does not appear.
+When Studio requests localhost access for the plugin, select **Allow**. The daemon uses the first available port in its configured range. The `stagehand_status` tool reports the selected port. If Stagehand does not connect, see [plugin setup](plugin.md).
 
 ## 3. Check the connection and run the test
 
 Ask your agent:
 
-> Use Stagehand to check its status and list the saved tests. Validate and run `blue-team-gun-hostile`, then explain the result and any failing step.
+> Use Stagehand to check the connection. List the saved tests. Validate `blue-team-gun-hostile`. Run the test. Explain the result and any failed step.
 
-The corresponding MCP tools are `stagehand_status`, `list_tests`, `validate_test`, and `run_test`. Keep the sample place open in edit mode; Stagehand launches the Play session.
+Use the `stagehand_status`, `list_tests`, `validate_test`, and `run_test` MCP tools for these actions. Keep the sample place open in edit mode. Stagehand starts the Play session.
 
-The test puts `p1` on the Blue team, spawns the character using a game hook, equips the Gun, and checks for the `Hostile` tag. A successful run reports passed steps. If it fails, inspect the reported reason and nearby logs before retrying.
+The test assigns `p1` to the Blue team. A game hook creates the character. The test equips the Gun and checks for the `Hostile` tag. If the test fails, read the cause and logs before you run it again.
 
 ::: tip Multiple open places
 Pass `--place` with a place ID or a distinctive part of its name to select the Studio instance to drive.
 :::
 
-## 4. Bring Stagehand to your game
+## 4. Configure Stagehand for your game {#_4-bring-stagehand-to-your-game}
 
-Register the same MCP binary with `--root` pointing to your game's project directory. Save tests in that project's `playtests/` folder, use [built-in actions](reference/index.md), and expose game-specific operations through [game hooks](game-hooks.md).
+Set `--root` to your game's project directory. Save tests in its `playtests/` folder. Use [built-in actions](reference/index.md) for common operations. Use [game hooks](game-hooks.md) to call functions in your game.
 
 - [Writing playtests](writing-tests.md) covers selectors, actors, fragments, and expectations.
 - [MCP tools](mcp.md) covers inspecting the live game and reviewing runs.

@@ -1,8 +1,8 @@
 # Playtest spec (v1)
 
-A playtest is a YAML (canonical) or JSON file `playtests/<name>.playtest.yaml`, validated by
-`schema/playtest.schema.json`. Action/condition names and their params are then checked against the catalog
-(`schema/catalog.json` + live `game.*` entries).
+A playtest is a file at `playtests/<name>.playtest.yaml`. YAML is the standard format; JSON is also accepted.
+Stagehand validates the file against `schema/playtest.schema.json`.
+It then checks action names, condition names, and parameters against `schema/catalog.json` and available `game.*` hooks.
 
 ## Top-level fields
 
@@ -15,11 +15,11 @@ A playtest is a YAML (canonical) or JSON file `playtests/<name>.playtest.yaml`, 
 | `session.players` | integer 0..8 | `0` (or `1` if mode=play, `2` if mode=multiplayer) | |
 | `session.reuse` | boolean | `true` | keep the Studio session alive between runs |
 | `session.reset` | `respawn \| hook \| none` | `respawn` | applied before a run in a reused session |
-| `timeout` | duration | `60s` | whole-run budget (setup + steps + teardown) |
+| `timeout` | duration | `60s` | time limit for the complete run (setup + steps + teardown) |
 | `failOnError` | boolean | `true` | any `error`-level Output on any node fails the active step |
 | `actors` | map name → `{ player: 1..8 }` | `p1..pN` | extra aliases; `p1..pN` always exist |
 | `vars` | map name → value | `{}` | referenced as `$name` |
-| `fragments` | map name → step[] | `{}` | named step lists for `use:` steps; shadow shared fragments of the same name (see [Fragments](#fragments)) |
+| `fragments` | map name → step[] | `{}` | named step lists for `use:` steps; take priority over shared fragments of the same name (see [Fragments](#fragments)) |
 | `setup` | step[] | `[]` | once per session when reused, every run otherwise |
 | `steps` | step[] (≥1) | **required** | |
 | `teardown` | step[] | `[]` | always runs, even after failure or cancel |
@@ -39,23 +39,22 @@ If `mode` is omitted: 0 → `run`, 1 → `play`, ≥2 → `multiplayer`.
 
 ## Steps
 
-Each step is a map with **exactly one verb key** plus optional modifiers. For `do`/`wait`/`expect`, every
-other key is a param of the named action/condition (flat form).
+Each step is a map with exactly one verb key and optional modifiers.
+For `do`, `wait`, and `expect`, other keys are parameters of the named action or condition.
 
 | Verb | Value | Meaning |
 |---|---|---|
 | `do` | action name | perform; fails if the action errors or exceeds `timeout` |
 | `wait` | condition name | block until true; fail at `timeout` |
 | `expect` | condition name | assert now; with `within`, poll until true for that long; failure aborts unless `soft` |
-| `lua` | string, or `{ code, returns? }` | escape hatch action, runs on the resolved node with `actor, player, character, vars` in scope; return value can be `save`d |
+| `lua` | string, or `{ code, returns? }` | Lua action. Runs on the resolved node with `actor, player, character, vars` in scope; return value can be `save`d |
 | `parallel` | array of branches; a branch is a step list or a single step | branches run concurrently, then join; first non-soft failure cancels the others |
 | `each` | `{ actors: [names] \| "all", steps: [...] }` | run `steps` once per actor with `as` bound (sequentially, in listed order) |
-| `use` | fragment name | splice in a named step list (`fragments:` in this file, else `playtests/_shared/<name>.fragment.yaml`); modifiers: `as` (actor for steps that name none), `vars` (map substituted into the fragment's steps), `soft`, `label`, `if` |
+| `use` | fragment name | Insert a named step list (`fragments:` in this file, else `playtests/_shared/<name>.fragment.yaml`); modifiers: `as` (actor for steps that name none), `vars` (map substituted into the fragment's steps), `soft`, `label`, `if` |
 
-A condition written in Lua uses the condition form: `{ wait: lua, code: "return workspace:GetAttribute('Ready')" }`
-or `{ expect: lua, code: "…" }` (truthy return = true). A bare `lua:` step is always an action. Give every
-Lua step a `label`: without one it is displayed as `lua: <code…>` and validation warns, because
-`"lua lua as p1"` tells a reader nothing.
+Use the condition form for Lua conditions: `{ wait: lua, code: "return workspace:GetAttribute('Ready')" }` or `{ expect: lua, code: "…" }`.
+A truthy return value means the condition is true. A `lua:` step is always an action.
+Add a `label` to each Lua step. Without a label, the display shows `lua: <code…>` and validation gives a warning.
 
 ### Modifiers
 
@@ -67,21 +66,22 @@ Lua step a `label`: without one it is displayed as `lua: <code…>` and validati
 | `within` | duration | expect | wait-then-assert window; absent = instant |
 | `soft` | boolean | all | failure is recorded, run continues |
 | `label` | string | all | display name in reports and the Studio progress widget; recommended for every `lua` step |
-| `save` | var name | do/lua | store the return value in `vars[save]`; vars are run-wide, so a `save` inside `each` is overwritten by every later actor (the last one wins) — read it inside the same iteration or use distinct names |
+| `save` | var name | do/lua | store the return value in `vars[save]`; vars are run-wide, so a `save` inside `each` is overwritten by every later actor (the last value remains) — read it inside the same iteration or use distinct names |
 | `if` | `"$var"` | all | skip (reported `step.skipped`, reason `if`) when the var is falsy (`nil`, `false`, `0`, `""`) |
 | `with` | map | do/wait/expect | params, merged over flat params; **required** for a param whose name is a modifier (`label`, `timeout`, `as`, …), which would otherwise be read as the modifier |
 
-Actions that need a time budget (e.g. `character.moveTo`) use the step `timeout`; there is no separate
-`timeout` param. A `lua` step's return value (and any action's non-nil return) is reported in the run's
-step table even without `save`; `save` additionally stores it for later `$name` references.
+Actions such as `character.moveTo` use the step's `timeout` field. They do not have a separate timeout parameter.
+The report shows Lua return values and non-nil action return values, including without `save`.
+Use `save` to store the value for later `$name` references.
 
 ### Fragments
 
-A fragment is a named step list reused by `use:` steps. Define it in the playtest under `fragments:`, or
-share it with every test in the folder as `playtests/_shared/<name>.fragment.yaml`
-(`{ name, description?, steps }`; the name must match the file name and be kebab-case). A fragment in the
-file shadows a shared one of the same name. Fragments may themselves contain `use:` steps (nesting limit 8;
-a fragment that uses itself is an error).
+A fragment is a named step list that `use:` steps can reuse.
+Define a local fragment under `fragments:` in the playtest.
+To share a fragment, save it as `playtests/_shared/<name>.fragment.yaml` with `{ name, description?, steps }`.
+The name must match the file name and use lowercase words separated by hyphens.
+A local fragment takes priority over a shared fragment with the same name.
+Fragments can contain `use:` steps, with a nesting limit of 8. A fragment cannot reference itself.
 
 ```yaml
 fragments:
@@ -93,11 +93,11 @@ steps:
   - { use: spawn-via-menu, as: p2, vars: { team: Red }, soft: true }
 ```
 
-Expansion happens at compile time: the fragment's steps get ids `steps.N.use.<name>.i`, inherit `as`
-(for steps that name no actor) and `soft` from the use step, and `vars` on the use step are substituted
-into them first (whole-value `$name` references, like top-level `vars`). `if` on a use step skips the whole
-expansion. Selectors inside a fragment that hard-code an actor (`@p1.gui…`) are not rewritten; write
-`@<actor>` only when the fragment is meant for that player.
+Stagehand expands fragments at compile time. Expanded step IDs use `steps.N.use.<name>.i`.
+Steps inherit `as` when they have no actor. They also inherit `soft` from the `use` step.
+The `use` step's `vars` replace whole-value `$name` references first.
+The `if` field applies to the complete expansion.
+Stagehand does not replace fixed actor names in selectors, such as `@p1.gui`. Use a fixed actor only when required.
 
 ### Context resolution
 
@@ -114,10 +114,10 @@ Then the target node:
 | `server` | server node; actor bound to its `Player` | server node; no actor |
 | `edit` | edit node; actor ignored (warning) | edit node |
 
-Steps that need a player (`player.*`, `character.*`, `input.*`, `gui.*`) require `as` when `players` ≥ 2;
-with `players: 1`, `as` defaults to `p1`. With `players: 1`, steps where an actor is optional (`lua`, most
-`game.*` hooks) also default to `p1` outside edit mode, so `player` and `character` are set in a server-side
-`lua` step.
+Player-specific steps require `as` when `players` is 2 or more. These include `player.*`, `character.*`, `input.*`, and `gui.*`.
+With one player, the default actor is `p1`.
+Outside edit mode, this default also applies to optional actors in Lua steps and most game hooks.
+Thus, a server Lua step can use `player` and `character` in a one-player session.
 
 ## Selectors
 
@@ -135,9 +135,9 @@ Params with `format: selector` accept:
 | wildcard | `Workspace.Enemies.*`, `Workspace.**.Spawn` | `*` = any child, `**` = any depth |
 | filter | `Workspace.Enemies[Name=Boss]`, `Workspace.*[@Team=Red,Health=100]` | children matching property (or `@attribute`) equality |
 
-Selectors with a trailing `[]` return all matches; otherwise the first match (depth-first, child order). For
-conditions over multiple matches the condition must hold for **all** of them. Zero matches → `RESOLVE_FAILED`
-(for `instance.exists` → false).
+A selector that ends with `[]` returns all matches. Otherwise, it returns the first match in depth-first child order.
+A condition must be true for all matched instances.
+No matches causes `RESOLVE_FAILED`, except for `instance.exists`, which returns false.
 
 ```ebnf
 selector   = ( var | tag | actor | path ) [ "[]" ] ;
@@ -155,12 +155,12 @@ tagname    = { any char except "[" } ;
 literal    = number | "true" | "false" | { any char except "," | "]" } ;
 ```
 
-Names with spaces or dots are quoted: `Workspace.'Blue Spawn'`. Filter literals: numbers and `true/false` are
-typed, everything else is a string.
+Put quotation marks around names that contain spaces or dots: `Workspace.'Blue Spawn'`.
+Filter values recognize numbers and `true` or `false`. Other filter values are strings.
 
 ## Values
 
-Coercion is driven by the catalog param schema; untyped values pass through as JSON.
+The catalog parameter schema controls value conversion. Values without a specified type remain JSON values.
 
 | YAML value | Param schema | Roblox value |
 |---|---|---|

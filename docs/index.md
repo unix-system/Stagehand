@@ -1,10 +1,10 @@
 ---
 layout: home
-title: Playtests, ready for their cue
+title: Automated playtests for Roblox Studio
 hero:
   name: Stagehand
-  text: Give your game a proper rehearsal.
-  tagline: Write the steps. Let your coding agent run them in Roblox Studio. Know exactly where the scene went wrong.
+  text: Automated playtests for Roblox Studio.
+  tagline: Write test steps in YAML. Use your coding agent to run them in Studio. Read the results for each step.
   image:
     src: /logo.svg
     alt: Stagehand theatrical lantern
@@ -16,45 +16,49 @@ hero:
       text: View on GitHub
       link: https://github.com/unix-system/Stagehand
 features:
-  - title: Small scripts. Clear expectations.
-    details: Describe player actions, wait for the game to react, and assert the result. Keep readable YAML playtests beside your game.
+  - title: Define test steps
+    details: Select player actions. Add conditions to check the results. Save the YAML files in your game project.
     link: /writing-tests
     linkText: Write a playtest
-  - title: Your agent runs the rehearsal.
-    details: An MCP server connects your coding agent to Studio, with live step reports, captured logs, and the context behind a failure.
+  - title: Run tests from your agent
+    details: The MCP server connects your coding agent to Studio. It reports step results, error details, and logs.
     link: /mcp
     linkText: Connect your agent
-  - title: Your game knows its own cues.
-    details: Expose real game logic as named actions and conditions. Spawn a player, reset a round, or check match state through game hooks.
+  - title: Call game functions
+    details: Use game hooks to call functions in your game. A hook can create a player character or reset a match.
     link: /game-hooks
     linkText: Add game hooks
 ---
 
 <p class="eyebrow">Do. Wait. Expect.</p>
 
-## A scene you can run again.
+## Example playtest
 
-Put a player on a team, request a spawn, and check what happens when they equip a tool.
-This playtest runs against the repository's sample game; `game.requestSpawn` is a hook supplied by that game.
+This playtest uses the sample game in the repository. It assigns a team to a player and creates the player character.
+It then equips a tool and checks for a tag. The sample game supplies the `game.requestSpawn` hook.
 
 ```yaml
 name: blue-team-gun-hostile
 session: { mode: play, players: 1 }
 steps:
-  # Set the scene using built-in actions and a game hook.
+  # Set the team and create the player character.
   - { do: player.setTeam, as: p1, team: Blue }
   - { do: game.requestSpawn, as: p1 }
 
-  # Wait for the character instead of guessing a sleep duration.
+  # Wait until the character is loaded.
   - { wait: character.loaded, as: p1, timeout: 10s }
   - { do: character.equipTool, as: p1, tool: Gun }
 
-  # Check the observable result, with time for the game to react.
+  # Allow up to two seconds for the tag to appear.
   - { expect: instance.hasTag, target: "@p1.character", tag: Hostile, within: 2s }
 ```
 
-### From a step to a result
+### How Stagehand runs a test
 
-Your coding agent sends the playtest to the Stagehand MCP server. The Studio plugin runs each step on the appropriate edit, server, or client node and reports its outcome. When a step fails, the report includes the reason and available expected/actual values and logs.
+Your coding agent sends the playtest to the Stagehand MCP server.
+The Studio plugin runs each step on an edit, server, or client node.
+The plugin reports the result of each step.
+If a step fails, the report includes the cause and available logs.
+The report also includes expected and actual values when available.
 
-[Run your first playtest →](quickstart.md) · [Explore actions and conditions →](reference/index.md)
+[Run your first playtest](quickstart.md) · [Read the action and condition reference](reference/index.md)

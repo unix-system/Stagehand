@@ -1,13 +1,11 @@
 # MCP server (`stagehand-mcp`)
 
-`stagehand-mcp` is a stdio MCP server that also runs the HTTP broker the Studio plugin connects to
-(the first free port in `127.0.0.1:38491`–`38500`; `STAGEHAND_PORT` moves the range start). Several MCP
-clients can run their own daemons at once, each sees every open Studio, and `--place` picks which Studio a
-daemon drives when more than one is open. Tool names come from
-[architecture.md](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#mcp-surface-packagesmcpsrcserver).
+`stagehand-mcp` is a stdio MCP server and HTTP broker. The Studio plugin connects to this broker.
+The daemon selects the first available port in `127.0.0.1:38491`–`38500`. The `STAGEHAND_PORT` variable changes the range start.
+Each MCP client can run a separate daemon. Each daemon can see all open Studio instances.
+Use `--place` to select a Studio instance. The [architecture document](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#mcp-surface-packagesmcpsrcserver) defines the MCP interface.
 
-> The tool reference below is generated from `packages/mcp/src/server/tools.ts`. When in doubt, trust the
-> tool's own input schema as listed by your MCP client.
+> This reference describes the definitions in `packages/mcp/src/server/tools.ts`. Your MCP client's input schema is the current source for tool arguments.
 
 ## Client configuration
 
@@ -49,9 +47,9 @@ or commit a project-scoped `.mcp.json`:
 }
 ```
 
-Add `"--allow-eval"` to `args` only if you want agents to use `eval_lua`. Tests and run reports are stored
-relative to the project root (`--root <dir>`, default the daemon's working directory):
-`playtests/*.playtest.yaml` and `.stagehand/runs/`.
+To enable `eval_lua`, add `"--allow-eval"` to `args`.
+Stagehand stores tests in `playtests/` and reports in `.stagehand/runs/`, relative to the project root.
+Set the root with `--root`. The default is the daemon's working directory.
 
 | Flag | Meaning |
 |---|---|
@@ -64,12 +62,11 @@ relative to the project root (`--root <dir>`, default the daemon's working direc
 
 ## Live progress in Claude Code
 
-`packages/claude-mod/` is a Claude Code mod (`stagehand-progress`) that follows runs while they go: a band
-above the prompt with the running step and its budget, a `/stagehand` pane with every step, the game log
-tail and a Cancel button, the status line, and a toast plus native notification on finish. It needs nothing
-from the daemon beyond `get_run format:"json"` and `tail_run`, which it calls over the session's own MCP
-connection. Load it with `claude --plugin-dir packages/claude-mod` (details in
-[`packages/claude-mod/README.md`](https://github.com/unix-system/Stagehand/blob/main/packages/claude-mod/README.md)).
+The `stagehand-progress` Claude Code mod displays test progress above the prompt and in a `/stagehand` pane.
+It shows the active step, time limit, logs, results, and a Cancel button. It sends a notification when the run ends.
+The mod uses `get_run` and `tail_run` through the session's MCP connection.
+Load it with `claude --plugin-dir packages/claude-mod`.
+See the [mod README](https://github.com/unix-system/Stagehand/blob/main/packages/claude-mod/README.md) for details.
 
 ## Recommended agent workflow
 
@@ -79,52 +76,61 @@ inspect ──► draft YAML ──► validate_test ──► run_steps ──�
    └──────── fix paths ◄────────┴──── fix ◄──────┘
 ```
 
-1. `stagehand_status` — is Studio attached? Which nodes exist?
-2. `list_actions` + `inspect` — learn the catalog, the game's `game.*` hooks, and real instance paths.
-3. Draft the playtest (see [writing-tests.md](writing-tests.md)).
-4. `validate_test { spec }` — schema, catalog names, params, contexts, actors. Cheap, offline.
-5. `run_steps { steps, session }` — run the draft live without saving; iterate on failures.
-6. `save_test { name, spec }`, then `run_test { name }` to confirm the saved file passes.
+1. Use `stagehand_status` to check the Studio connection.
+2. Use `list_actions` to find actions and game hooks.
+3. Use `inspect` to find instance paths.
+4. Write the test. See [Writing playtests](writing-tests.md).
+5. Use `validate_test` to check the format, actions, parameters, contexts, and actors. This check does not need Studio.
+6. Use `run_steps` to run the steps without saving them.
+7. Correct any test errors.
+8. Use `save_test` to save the test.
+9. Use `run_test` to check the saved file.
 
 The `write_playtest` prompt packages this workflow as a template.
 
 ## Tools
 
-Generated from the tool definitions in `packages/mcp/src/server/tools.ts` (the input schema your MCP
-client lists is authoritative). `?` = optional. Durations accept `"10s"`, `"500ms"`, `"2m"` or milliseconds.
+This reference describes `packages/mcp/src/server/tools.ts`. Use your MCP client's input schema for the current argument definitions.
+The `?` symbol identifies an optional argument. Durations accept strings such as `"10s"`, `"500ms"`, and `"2m"`, or a number of milliseconds.
 
 | Tool | Purpose |
 |---|---|
-| [`stagehand_status`](#stagehand_status) | Show daemon health: broker port, attached Studio nodes (edit/server/client with sessionId and playerIndex), the current test session, the active run and catalog state. |
-| [`list_actions`](#list_actions) | List the catalog of playtest actions (use with do:) and conditions (use with wait:/expect:), including live game.* hooks from the running game. |
-| [`inspect`](#inspect) | Inspect instances in the live DataModel to discover paths for selectors: remotes, teams, tools, GUI elements, tagged parts, attributes. |
-| [`validate_test`](#validate_test) | Validate a playtest (YAML/JSON text, object, or a saved test by name) against the schema and the action catalog without running it. |
-| [`run_steps`](#run_steps) | Run unsaved steps in Studio right away (reuses the live session as it is when no mode/players are given) and return a pass/fail report with reason/expected/actual, lua return values and vars; bounded wait (default 90s) with a partial report past it. |
-| [`run_test`](#run_test) | Run a saved playtest from playtests/&lt;name&gt;.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars); bounded wait. |
-| [`run_suite`](#run_suite) | Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests); bounded by `timeout`. |
-| [`get_run`](#get_run) | Get the result of a run by runId (or "latest"): status, failure (step, reason, expected, actual, hint, node, logs around), per-step statuses with reasons and values, final vars. Works for in-progress runs. |
-| [`tail_run`](#tail_run) | Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished); `waitMs` long-polls. |
-| [`cancel_run`](#cancel_run) | Cancel a queued or running run (default: the active run). |
-| [`list_tests`](#list_tests) | List saved playtests in playtests/ with description and tags, plus the shared fragments in playtests/_shared/. |
-| [`get_test`](#get_test) | Return the YAML source of a saved playtest. |
-| [`save_test`](#save_test) | Validate and save a playtest to playtests/&lt;name&gt;.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). |
-| [`delete_test`](#delete_test) | Delete a saved playtest (playtests/&lt;name&gt;.playtest.yaml). |
-| [`start_session`](#start_session) | Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). |
-| [`stop_session`](#stop_session) | End the current Studio test session and wait for Studio to confirm; also ends a test this daemon launched but lost track of. |
-| [`eval_lua`](#eval_lua) | Run arbitrary Luau on a node and return its value and captured logs. |
+| [`stagehand_status`](#stagehand_status) | Report the broker port, connected nodes, session, run status, and catalog state. |
+| [`list_actions`](#list_actions) | List available actions, conditions, and game hooks. |
+| [`inspect`](#inspect) | Find instances and paths in the selected DataModel. |
+| [`validate_test`](#validate_test) | Check a test against the schema and catalog without running it. |
+| [`run_steps`](#run_steps) | Run unsaved steps and return a report. By default, the call returns after 90 seconds if the run continues. |
+| [`run_test`](#run_test) | Run a saved playtest and return its report. |
+| [`run_suite`](#run_suite) | Run saved tests in sequence, selected by tag or name. The timeout limits how long the call waits. |
+| [`get_run`](#get_run) | Get the available report for an active or completed run. |
+| [`tail_run`](#tail_run) | Get events after a sequence number. Use `waitMs` to wait for new events. |
+| [`cancel_run`](#cancel_run) | Cancel a queued or active run. |
+| [`list_tests`](#list_tests) | List saved tests and shared fragments. |
+| [`get_test`](#get_test) | Read a saved test's YAML source. |
+| [`save_test`](#save_test) | Validate and save a playtest. Replace an existing test with the same name. |
+| [`delete_test`](#delete_test) | Delete a saved test. Keep its previous reports. |
+| [`start_session`](#start_session) | Start or reuse a Studio session with the selected mode and player count. |
+| [`stop_session`](#stop_session) | Stop a Studio test session and wait for confirmation. |
+| [`eval_lua`](#eval_lua) | Run Luau on a node and return its value and logs. |
 
 ### `stagehand_status`
 
-Show daemon health: broker port, attached Studio nodes (edit/server/client with sessionId and playerIndex), the current test session, the active run and catalog state. Call this first to check that Roblox Studio with the Stagehand plugin is connected.
+This tool reports the broker port, Studio nodes, session, active run, and catalog state.
+Call it first to check the Studio connection.
 
-No arguments. `studioTest` reports the test Studio's shared Launcher is running right now (any daemon's), with
-`ours` (launched by this daemon's port, or a session it ended) and `tracked` (it is the current session); a
-test of ours that is not tracked comes with a `hint` to run `stop_session`. `catalog.gameHooksVerified` is
-true only while a game node is attached; between sessions the `game.*` entries are cached and checked loosely.
+This tool has no arguments. The `studioTest` field reports the test in Studio's shared Launcher, including tests from other daemons.
+The `ours` field identifies a test started by this daemon's port or a session it ended.
+The `tracked` field identifies the current session. An untracked test that belongs to this daemon includes a `stop_session` hint.
+The `catalog.gameHooksVerified` field is true only while a game node is attached.
+Between sessions, Stagehand keeps cached hook entries and applies less strict checks.
 
 ### `list_actions`
 
-List the catalog of playtest actions (use with do:) and conditions (use with wait:/expect:), including live game.* hooks from the running game. Each line: name [kind] (contexts, * = default) needs-as? {params; ? = optional}: summary. Pass `name` for one entry's full JSON schema. Includes a step-syntax cheat sheet.
+This tool lists actions, conditions, and available game hooks.
+Use actions with `do`. Use conditions with `wait` or `expect`.
+Each entry shows its name, kind, contexts, actor requirement, parameters, and description.
+The `*` symbol identifies the default context. The `?` symbol identifies an optional parameter.
+Set `name` to get the full JSON schema for one entry. The result also includes a step syntax reference.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -135,7 +141,10 @@ List the catalog of playtest actions (use with do:) and conditions (use with wai
 
 ### `inspect`
 
-Inspect instances in the live DataModel to discover paths for selectors: remotes, teams, tools, GUI elements, tagged parts, attributes. Give exactly one of path (e.g. "ReplicatedStorage.Remotes", "@p1.gui"), tag, or className. Runs on the server of the current session if one is running, else on the edit DataModel; use on: client with as: p1 to see a player's GUI.
+This tool inspects instances in the active DataModel and returns paths for selectors.
+Specify exactly one of `path`, `tag`, or `className`.
+During a session, the default context is the server. Otherwise, the tool uses the edit DataModel.
+To inspect a player's GUI, set `on: client` and `as: p1`.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -149,7 +158,10 @@ Inspect instances in the live DataModel to discover paths for selectors: remotes
 
 ### `validate_test`
 
-Validate a playtest (YAML/JSON text, object, or a saved test by name) against the schema and the action catalog without running it. Returns errors with paths and line numbers, warnings, and the compiled plan (which node each step runs on, merged segments). Use before run_steps/save_test.
+This tool checks a playtest against the schema and action catalog without running it.
+It accepts YAML, JSON, an object, or a saved test name.
+The result includes errors, warnings, and the execution plan. Errors include paths and available line numbers.
+Use this tool before `run_steps` or `save_test`.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -158,7 +170,13 @@ Validate a playtest (YAML/JSON text, object, or a saved test by name) against th
 
 ### `run_steps`
 
-Run unsaved steps in Studio right away (launches or reuses a test session) and return a pass/fail report with reason/expected/actual for failures. steps is a YAML/JSON list of steps (or a whole playtest document; the other arguments are merged over it), e.g. "- { do: player.setTeam, as: p1, team: Blue }\n- { expect: player.onTeam, as: p1, team: Blue }". Set session.players (0 = Run mode, 1 = Play, 2-8 = multiplayer); **with no mode/players the live session is reused as it is** (reset `none`), and the report says so. Streams step progress when the client sends a progressToken. Waits up to 90s by default, then returns the partial report with the runId.
+This tool runs unsaved steps in Studio. It starts or reuses a session and returns a report.
+The `steps` argument accepts a YAML or JSON step list, or a complete playtest document.
+Other arguments override fields in that document.
+Set `session.players` to select Run mode (0), Play (1), or multiplayer (2–8).
+Without a mode or player count, the tool reuses the current session with reset policy `none`.
+The report identifies this reuse. A client can supply `progressToken` to receive progress updates.
+By default, the call waits up to 90 seconds. It then returns the available report and `runId`.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -168,18 +186,21 @@ Run unsaved steps in Studio right away (launches or reuses a test session) and r
 | `actors`? | object | Actor aliases, e.g. {blue: {player: 1}} |
 | `setup`? | object[] |  |
 | `teardown`? | object[] |  |
-| `timeout`? | string \| number | Whole-run budget (default 60s) |
+| `timeout`? | string \| number | Time limit for the complete run (default 60s) |
 | `failOnError`? | boolean | Fail the active step on any error-level Output (default true) |
 | `name`? | string | Run name for the report (default adhoc) |
 | `wait`? | boolean \| duration | true/omitted = wait up to 90s; false = return the runId at once; a duration = that cap. Past the cap the partial report is returned and the run keeps going |
 
-The report's step table shows each `lua` step's (and any action's) return value as `→ value`, a `## Vars`
-section lists the saved vars, and a failure carries a one-line **Hint** when the daemon recognises the shape
-(instant `expect` → `within:`; attribute unset on the server → `on: client`).
+The step table shows return values from Lua steps and actions as `→ value`.
+The `Vars` section lists saved variables.
+For known failure patterns, the report includes a **Hint**. Examples include adding `within` or checking a client-only attribute with `on: client`.
 
 ### `run_test`
 
-Run a saved playtest from playtests/&lt;name&gt;.playtest.yaml in Studio and return the report (status, failing step with reason/expected/actual/hint, logs around the failure, per-step table with values, vars). Reports are stored under .stagehand/runs/. Waits up to 90s by default, then returns the partial report with the runId to follow via tail_run/get_run; wait: false returns the runId at once.
+This tool runs `playtests/<name>.playtest.yaml` in Studio and returns a report.
+The report includes status, failure details, logs, step values, and variables. Stagehand saves reports under `.stagehand/runs/`.
+By default, the call waits up to 90 seconds. It then returns the available report and `runId`.
+Use `tail_run` or `get_run` to read later results. Set `wait: false` to return the `runId` immediately.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -190,7 +211,11 @@ Run a saved playtest from playtests/&lt;name&gt;.playtest.yaml in Studio and ret
 
 ### `run_suite`
 
-Run several saved playtests sequentially, selected by tag and/or names (no selector = all tests). Returns a pass/fail table with each runId and the first failure reason; use get_run for details. Blocks up to `timeout` (default 90s): past it the table so far is returned, the in-flight test keeps running (follow its runId with tail_run) and the remaining tests are not started.
+This tool runs saved tests in sequence. Select tests by tag or name. Without a selection, it runs all tests.
+The result lists each run ID, status, and first failure cause. Use `get_run` for details.
+The call waits until `timeout`, which defaults to 90 seconds.
+At the time limit, it returns the available results. The active test continues, but remaining tests do not start.
+Use `tail_run` with the active run ID to read later results.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -201,7 +226,9 @@ Run several saved playtests sequentially, selected by tag and/or names (no selec
 
 ### `get_run`
 
-Get the result of a run by runId (or "latest"): status, failure (step, reason, expected, actual, hint, node, logs around), per-step statuses with reasons and values, and final vars. Works for in-progress runs (the same markdown, headed "(in progress)", with the reasons and values known so far) and past runs stored in .stagehand/runs/.
+This tool returns a report for `runId` or `"latest"`.
+The report includes status, failure details, logs, step values, and final variables.
+It supports active runs and saved runs under `.stagehand/runs/`. An active report shows only the results available so far.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -210,7 +237,10 @@ Get the result of a run by runId (or "latest"): status, failure (step, reason, e
 
 ### `tail_run`
 
-Return a run's events after a sequence number (step.started/passed/failed/skipped, log, session, run.finished). Poll with afterSeq = the returned lastSeq to follow a run started with wait: false. With `waitMs` the call long-polls: it returns as soon as a new event arrives, when the run finishes, or after waitMs (max 60s), so following a run costs one call per event burst instead of a sleep loop.
+This tool returns events after a specified sequence number.
+Set `afterSeq` to the previous response's `lastSeq` to get new events.
+Set `waitMs` to wait for an event. The maximum is 60 seconds.
+The call returns when an event arrives, the run ends, or the time limit expires.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -221,7 +251,8 @@ Return a run's events after a sequence number (step.started/passed/failed/skippe
 
 ### `cancel_run`
 
-Cancel a queued or running run (default: the active run). In-flight steps are cancelled on the nodes, then teardown runs.
+This tool cancels a queued or active run. The default is the active run.
+Stagehand cancels active steps on their nodes, then runs teardown.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -229,7 +260,9 @@ Cancel a queued or running run (default: the active run). In-flight steps are ca
 
 ### `list_tests`
 
-List saved playtests in playtests/ with description and tags, plus the shared step fragments in playtests/_shared/ (`name`, `description`, step count) that `use: <name>` steps can reference. The `_shared` folder is never listed as tests.
+This tool lists saved tests in `playtests/`, with descriptions and tags.
+It also lists shared fragments from `playtests/_shared/`, with their names, descriptions, and step counts.
+Fragments are not listed as tests. Reference a fragment with `use: <name>`.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -245,7 +278,10 @@ Return the YAML source of a saved playtest.
 
 ### `save_test`
 
-Validate and save a playtest to playtests/&lt;name&gt;.playtest.yaml (YAML text is saved verbatim, keeping comments; objects are serialized). The spec's name must equal `name`. Refuses invalid specs unless force: true. Overwrites an existing test.
+This tool validates a test and saves it to `playtests/<name>.playtest.yaml`.
+It preserves YAML text and comments. It serializes object input.
+The test's name must equal the `name` argument. Invalid input requires `force: true` to save.
+Saving replaces an existing test with the same name.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -255,7 +291,7 @@ Validate and save a playtest to playtests/&lt;name&gt;.playtest.yaml (YAML text 
 
 ### `delete_test`
 
-Delete a saved playtest (playtests/&lt;name&gt;.playtest.yaml). Past run reports are kept.
+This tool deletes `playtests/<name>.playtest.yaml`. It keeps previous run reports.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -263,7 +299,12 @@ Delete a saved playtest (playtests/&lt;name&gt;.playtest.yaml). Past run reports
 
 ### `start_session`
 
-Start (or reuse) a Studio test session so later runs and inspect calls are fast: players 0 = Run mode, 1 = Play, 2-8 = multiplayer (Studio simulated players). Waits until the server and all clients are attached and characters are loaded (or 2.5s after the players joined when no character spawns, for games that spawn characters from a menu; use wait: character.loaded in tests then). Fails if Studio has not started the test within 30s or it is not ready within 60s (1.5x for multiplayer).
+This tool starts or reuses a Studio session.
+Set the player count to 0 for Run mode, 1 for Play, or 2–8 for multiplayer.
+It waits for server and client nodes to attach and for characters to load.
+If the game creates no characters, it can return 2.5 seconds after players join.
+For such games, add `wait: character.loaded` after the step that creates a character.
+The launch must start within 30 seconds and become ready within 60 seconds. Multiplayer limits are 1.5 times longer.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -273,7 +314,14 @@ Start (or reuse) a Studio test session so later runs and inspect calls are fast:
 
 ### `stop_session`
 
-End the current Studio test session (EndTest on the server; RunService:Stop via the edit node as fallback, which only works for Run mode, and the fallback says so honestly with `ended: false` for a Play/multiplayer test) and wait, bounded by 20s, for Studio to confirm the teardown (`studioStopped`), so a `start_session` right after does not race. Without a tracked session it still ends a test Studio reports as launched by this daemon (a failed launch, a detached server node) when that test's server node is attached, and otherwise explains what to do. Refused while a run is active; cancel_run first. With force: true also ends a test launched by another (restarted) daemon or by hand whose server node is attached here; a test driven by another live daemon must be stopped from that daemon or in Studio.
+This tool ends the current Studio session. It calls `EndTest` on the server.
+If that fails, it tries `RunService:Stop` on the edit node. This alternative works only in Run mode.
+For Play or multiplayer, the alternative returns `ended: false`.
+The tool waits up to 20 seconds for Studio to confirm the stop through `studioStopped`.
+It can also stop an untracked test started by this daemon, if the test's server node is attached.
+Cancel an active run with `cancel_run` before using this tool.
+With `force: true`, it can stop an attached test started manually or by a daemon that has restarted.
+A test controlled by another active daemon must be stopped through that daemon or Studio.
 
 | Argument | Type | Notes |
 |---|---|---|
@@ -281,7 +329,11 @@ End the current Studio test session (EndTest on the server; RunService:Stop via 
 
 ### `eval_lua`
 
-Run arbitrary Luau on a node and return its value and captured logs. `actor`, `player`, `character` and `vars` are in scope. Disabled unless the daemon was started with --allow-eval (returns EVAL_DISABLED). Defaults to the session's server, else the edit DataModel. For one-off debugging outside a Stagehand session, prefer a Studio MCP (roblox-assistant, Roblox Studio MCP).
+This tool runs Luau on a node and returns its value and logs.
+The code can access `actor`, `player`, `character`, and `vars`.
+Start the daemon with `--allow-eval` to enable this tool. Otherwise, it returns `EVAL_DISABLED`.
+The default context is the session server, or the edit DataModel when no session exists.
+For debugging outside a Stagehand session, use a Studio MCP tool.
 
 | Arg | Type | Notes |
 |---|---|---|
@@ -305,6 +357,6 @@ Run arbitrary Luau on a node and return its value and captured logs. `actor`, `p
 
 ## Errors
 
-Tool errors carry a code from [protocol.md](protocol.md#error-object): `RESOLVE_FAILED`, `TIMEOUT`,
-`ASSERTION_FAILED`, `UNKNOWN_ACTION`, `BAD_PARAMS`, `SESSION_ERROR`, `EVAL_DISABLED`, … plus daemon-level
-conditions such as "no Studio attached" (start Studio with the plugin, see [plugin.md](plugin.md)).
+Tool errors include a code from the [protocol reference](protocol.md#error-object).
+Examples include `RESOLVE_FAILED`, `TIMEOUT`, `BAD_PARAMS`, and `SESSION_ERROR`.
+Daemon errors can also report connection problems, such as no attached Studio instance. See [plugin setup](plugin.md).

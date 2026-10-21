@@ -1,20 +1,19 @@
 # Studio plugin
 
-The Stagehand plugin turns every Studio DataModel into a **node** that long-polls the local
-`stagehand-mcp` daemon over HTTP and executes steps. You install it once; the daemon launches test sessions
-through it.
+The Stagehand plugin creates a node in each Studio DataModel. Each node receives commands from the local `stagehand-mcp` daemon over HTTP.
+Install the plugin once. The daemon then uses it to start sessions and run test steps.
 
 ## Install
 
-**From a release:** download `Stagehand.rbxm` from the GitHub release (or the `Stagehand.rbxm` artifact of
-the latest CI run) and drop it into your local plugins folder:
+**From a release:** download `Stagehand.rbxm` from a GitHub release or the latest CI artifact.
+Copy the file into the local plugins folder:
 
 | OS | Folder |
 |---|---|
 | Windows | `%LOCALAPPDATA%\Roblox\Plugins` |
 | macOS | `~/Documents/Roblox/Plugins` |
 
-Or in Studio: **Plugins → Plugins Folder**, then copy the file there. Restart Studio (or reopen the place).
+To find this folder in Studio, select **Plugins → Plugins Folder**. After copying the file, restart Studio or reopen the place.
 
 **From source** (needs [Rojo](https://rojo.space) 7.x; the plugin has no Wally dependencies):
 
@@ -23,28 +22,26 @@ rojo build plugin --plugin Stagehand.rbxm      # builds straight into the Studio
 # or: rojo build plugin -o Stagehand.rbxm      # then copy it manually
 ```
 
-You should see a **Stagehand** toolbar button that opens the dock widget (tests, run button, live log,
-last result).
+The **Stagehand** toolbar button opens the dock widget. The widget contains the test list, run button, logs, and last result.
 
 ## HTTP permission prompt
 
-The plugin talks to `http://127.0.0.1:38491`–`38500` (the plugin setting `Stagehand.Port` and the daemon's
-`STAGEHAND_PORT` move the start of that range). The first time it does so, Studio asks whether the plugin
-may access `127.0.0.1`. **Allow** it. This permission is per plugin and per host, independent of the
-game's `HttpService.HttpEnabled`, so you do not need to enable HTTP in Game Settings.
+The plugin connects to `http://127.0.0.1:38491`–`38500`.
+The `Stagehand.Port` plugin setting and `STAGEHAND_PORT` daemon variable change the range start.
+Studio asks for permission to access `127.0.0.1`. Select **Allow**.
+This permission applies to the plugin and host. It does not depend on `HttpService.HttpEnabled` in Game Settings.
 
-If you denied it by mistake: **Plugins → Manage Plugins → Stagehand → (edit permissions)** and allow
-`127.0.0.1`. The prompt may appear again inside a test session window the first time a server or client
-node connects; allow it there too.
+If access was denied, open **Plugins → Manage Plugins → Stagehand → (edit permissions)**.
+Allow access to `127.0.0.1`.
+Studio can request this permission again when a server or client node first connects. Allow access in that window also.
 
-Several MCP clients (for example two Claude Code sessions) each run their own daemon on the next free port.
-The edit node attaches to all of them, so each client sees every open Studio; a test session's server and
-client nodes talk only to the daemon that launched it. Studio runs one test at a time: a second daemon's
-launch fails with "Studio is already running a test" until the first one ends.
+Each MCP client runs a daemon on the next available port. Edit nodes attach to each daemon, so every daemon sees open Studio instances.
+Test server and client nodes connect only to the daemon that started their session.
+Studio runs one test at a time. Another launch fails until the current test ends.
 
 ## How nodes map to DataModels
 
-Studio loads plugins again in every DataModel it creates, so one install yields several nodes:
+Studio loads plugins in each DataModel. One plugin installation can therefore create several nodes:
 
 | DataModel | Node role | Detected by | What runs there |
 |---|---|---|---|
@@ -52,108 +49,87 @@ Studio loads plugins again in every DataModel it creates, so one install yields 
 | Test server (Run, Play, Multiplayer) | `server` | `RunService:IsServer()` | server-context steps (the default for most actions/conditions), `EndTest` |
 | Each test client (Play: 1, Multiplayer: 2–8) | `client` | `RunService:IsClient()` | client-context steps (`gui.*`, `input.*`, `remote.fire`), with `playerIndex` = actor `pN` |
 
-The edit node writes the session id to the plugin setting `Stagehand.Session` and passes it via
-`StudioTestService` test args when it calls `ExecuteRunModeAsync` / `ExecutePlayModeAsync` /
-`ExecuteMultiplayerTestAsync(n)`. Server and client nodes read it back and attach to that session. A node
-that finds no session id (for example you pressed F5 yourself) attaches as an **orphan** and never receives
-steps. See [protocol.md](protocol.md) for the wire details and [writing-tests.md](writing-tests.md) for how
-steps are routed to nodes.
+The edit node writes the session ID to `Stagehand.Session`.
+It also passes the ID in test arguments through `StudioTestService` when it calls the selected `Execute*Async` method.
+Server and client nodes use this ID to attach to the session.
+A node without a session ID attaches as an **orphan**. Stagehand does not send test steps to orphan nodes.
+See [protocol.md](protocol.md) for communication details and [writing-tests.md](writing-tests.md) for context selection.
 
 ## Input visualisation
 
-Client nodes show what their `VirtualInput` is doing, so a watcher can follow a run in each client window
-(Play has one, Multiplayer one per player). Drawn by `plugin/src/UI/InputOverlay.luau` into a `ScreenGui`
-named `StagehandInput`:
+Each client window displays its `VirtualInput` actions. Play has one client window; multiplayer has one per player.
+The `plugin/src/UI/InputOverlay.luau` module draws these indicators in the `StagehandInput` ScreenGui:
 
-- **Cursor**: Studio's arrow cursor drawn at 2x (`rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png`,
-  128 px, tip on the position last sent to `SendMousePosition`, with a blue dot under the tip). It is at full
-  opacity while moves and clicks keep coming and for 1 s after the last one, then dims, and it is hidden
-  after 5 s without input.
-- **Motion trail**: `input.click` and `input.mouseMove { position }` no longer teleport the mouse. The
-  cursor glides along a short Bézier curve (`plugin/src/Motion.luau`: bowed 3–7 % off the chord, side
-  alternating per move, eased in and out) and each sample leaves a thin segment that fades over 0.5 s.
-  `input.mouseMove { delta }` sends the raw delta and only moves the cursor. The glide starts from the
-  real mouse only when it is inside the viewport and below the top bar (else the viewport centre), and
-  samples on the way that VirtualInput rejects as CoreGui are skipped; only the target must be reachable.
-- **Click pulse**: each press sends two pulses outwards from the tip (a ring and a soft disc growing
-  10→96 px; blue for Left, amber for Right, grey for Middle), presses the arrow in, and keeps a static
-  ring until the button is released.
-- **Key strip**: key caps along the bottom centre for `input.key` and `input.move` (`W`, `Shift`, `Enter`…),
-  lit while held and removed 0.6 s after release; `input.text` shows `⌨ "the text"` for a second.
+- **Cursor:** a 128-pixel arrow uses `rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png`, displayed at twice its normal size. Its tip follows `SendMousePosition`, with a blue dot below it. The arrow dims after one second without input. It disappears after five seconds.
+- **Motion trail:** `input.click` and position-based `input.mouseMove` move the cursor along a short Bézier curve. The curve offset is 3–7% of the straight-line distance and alternates sides. Each trail segment fades after 0.5 seconds. Delta-based movement uses the raw delta without this curve. Movement starts at the current mouse position if it is inside the viewport and below the top bar. Otherwise, it starts at the viewport center. Intermediate samples rejected as CoreGui are skipped. The target position must remain reachable.
+- **Click pulse:** each press shows a ring and disc that expand from 10 to 96 pixels. Left clicks use blue, right clicks use amber, and middle clicks use gray. The arrow moves inward on a press. A static ring remains until release.
+- **Key strip:** `input.key` and `input.move` display pressed keys at the bottom center. Indicators remain for 0.6 seconds after release. The `input.text` indicator shows the entered text for one second.
 
-The overlay is parented to **`CoreGui`** so nothing in the game can cover it or care about it; if that
-parenting throws, it falls back to the local player's **`PlayerGui`**. Every element is `Active = false`
-and the ScreenGui has `IgnoreGuiInset = true`, so positions are the raw screen pixels `VirtualInput` uses
-and the overlay never intercepts the input it draws. `gui.visible`/`gui.click` ignore it because it is not
-under `PlayerGui` (unless the fallback was taken). If a click ever fails with a CoreGui-related
-`VirtualInput` error, this overlay is the first suspect: set `INPUT_VISUALS = false` and retry.
+The overlay uses `CoreGui` as its parent. If that operation fails, it uses the local player's `PlayerGui`.
+Elements have `Active = false`. The ScreenGui has `IgnoreGuiInset = true`, so positions use the same screen coordinates as `VirtualInput`.
+The overlay does not intercept input. GUI actions ignore it unless it uses the PlayerGui alternative.
+For CoreGui-related click errors, set `INPUT_VISUALS = false` and repeat the test.
 
-**Disable it** with `INPUT_VISUALS = false` in `plugin/src/Config.luau` (constants only; there is no
-runtime setting yet). `MOUSE_SPEED_PX_S` (default 4000) sets the glide speed; each move is clamped to
-0.06–0.22 s regardless of distance.
+To disable these indicators, set `INPUT_VISUALS = false` in `plugin/src/Config.luau`. This option is not a runtime setting.
+The `MOUSE_SPEED_PX_S` constant controls cursor speed, with a default of 4000.
+Movement duration is limited to 0.06–0.22 seconds, regardless of distance.
 
-**Cost**: a glide is at most 24 position samples spread over ≤0.22 s (samples denser than 60 Hz are sent
-in the same frame), followed by the one-frame press/release, so at 60 fps a click adds ≤0.25 s to a step
-(a background client window rendering slower stretches the glide with it). Drawing
-failures are swallowed: the step still runs, and the node warns once per DataModel.
+A cursor movement uses at most 24 position samples over 0.22 seconds.
+Samples above 60 Hz share a frame. A press and release follow in one frame.
+At 60 fps, a click adds at most 0.25 seconds to a step. A slower background window can increase this duration.
+If drawing fails, the test step continues. The node gives one warning per DataModel.
 
 ## Progress widget
 
-Every Studio window of a test shows the **Stagehand Progress** dock widget (`plugin/src/UI/Progress.luau`,
-layout logic in the unit-tested `UI/ProgressModel.luau`), fed by the daemon's `progress` snapshots. In the
-edit window it docks on the left by default and opens the moment a session launches, showing a "Starting
-session" placeholder until the first snapshot arrives. Test client windows do not open it by themselves
-(Studio floats widgets created in a test DataModel over the viewport): click **Progress** on the Stagehand
-toolbar there once and dock it where you like; Studio restores it on later tests.
+The daemon sends progress snapshots to the **Stagehand Progress** dock widget.
+The widget code is in `plugin/src/UI/Progress.luau`. The layout code is in `UI/ProgressModel.luau`.
+In the edit window, the widget opens on the left when a session starts.
+It shows **Starting session** until a snapshot arrives.
+Client windows do not open the widget automatically. Select **Progress** in the client window's Stagehand toolbar.
+Dock the widget at the required position. Studio restores that position for later tests.
 
-- **Header**: run name, a status pill that pulses while the run is going, a progress bar, and the
-  per-target summary (`SERVER 3/3   P1 2/5`). The subtitle names the step that is running right now.
-- **Running step**: its dot pulses, a live counter shows elapsed time against the step's budget
-  (`2.4s / 10s`, counted on the window's own clock between snapshots) and a thin bar under the label fills
-  toward the budget, turning amber past 75 %. Finished steps keep their duration on the right.
-- **Client windows (multiplayer)**: your own steps are tagged **YOU**; every run of consecutive steps that
-  execute elsewhere (server, other players) folds into one clickable row — `7 steps on SERVER, P2 · running:
-  wait player.onTeam as p2` — with a rolled-up status dot. The group that contains the running step, or the
-  first failed one, expands by itself; click a row to toggle it. **MINE / ALL** in the header turns folding
-  off for that window. The main window always lists every step.
-- **Labels**: a step shows its `label:`; `lua` steps without one show their code (`lua: #game.Players…`),
-  which is why validation recommends a label for every lua step.
+- **Header:** shows the run name, status, progress bar, and results by target. The subtitle identifies the active step.
+- **Running step:** shows elapsed time and the time limit, for example `2.4s / 10s`. A bar turns amber after 75% of the limit. Completed steps show their duration.
+- **Client windows:** mark local steps with **YOU**. Consecutive steps on other targets appear in a single expandable group. The active or first failed group expands automatically. Select **MINE / ALL** to control grouping. The main window always lists all steps.
+- **Labels:** show the step's `label` value. Lua steps without labels show their code. Add a label to each Lua step.
 
 ## Phase 0 spike checklist
 
-Whether plugin nodes really load in simulated **client** DataModels (and a few other platform facts) must
-be confirmed by hand in Studio. Record your results in the
-[Phase 0 spike checklist](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#phase-0-spike-checklist). If client nodes do not load, Stagehand
-falls back to an injected client runtime behind the same protocol.
+Check plugin loading in simulated client DataModels manually in Studio.
+Record the results in the [Phase 0 checklist](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#phase-0-spike-checklist).
+If client nodes do not load, Stagehand uses an injected client runtime with the same protocol.
 
 ## Troubleshooting
 
-**Daemon not found** (dock shows *disconnected*, `stagehand_status` lists no nodes)
-- Is your MCP client running `stagehand-mcp`? The daemon only exists while the client has it started.
-- Same port on both sides? `STAGEHAND_PORT` (daemon) vs plugin setting `Stagehand.Port`.
-- Did you deny the HTTP prompt? Re-allow it (see above).
-- Another process on 38491 (or a second daemon from another client window)? Only one daemon can bind;
-  close the other client or pick a different port for both.
-- Check `curl http://127.0.0.1:38491/v1/health` from a terminal.
+**Daemon not found** (the widget shows *disconnected* or `stagehand_status` lists no nodes)
 
-**Session stuck** (`launching` forever, or steps time out with `SESSION_ERROR`)
-- A modal dialog in Studio (save prompt, update prompt, HTTP permission prompt in the test window) blocks
-  the launch; answer it.
-- Nodes attached as `orphan`: the session id did not reach the test DataModel. Stop the test, then run
-  again from the MCP tool, not with F5.
-- Call `stop_session`, or press **Stop** in Studio; the daemon ends idle sessions after 120 s anyway.
-- Set `session.reuse: false` on the test while investigating.
+1. Check that the MCP client runs `stagehand-mcp`.
+2. Check the daemon's `STAGEHAND_PORT` and the plugin's `Stagehand.Port` settings.
+3. Check localhost access permissions.
+4. Check for another process on port 38491.
+5. If needed, select an available port range for both the daemon and plugin.
+6. Run `curl http://127.0.0.1:38491/v1/health` to check the broker.
 
-**EndTest not tearing down** (windows stay open after a run)
-- A known Studio rough edge. The daemon times out the end, then falls back to stopping the session from the
-  edit node. If windows still linger, press **Stop** (or close the client windows) manually; the next run
-  launches a fresh session.
+**Session does not start** (`launching` persists or a step reports `SESSION_ERROR`)
 
-**Multiplayer focus stealing** (client windows pop to the front, keyboard input goes astray)
-- Multiplayer test windows grab focus when they open. Input steps use `VirtualInput` on the target client,
-  which does not depend on OS focus, but avoid typing in Studio while a multiplayer run is launching.
-- Keep `session.reuse: true` so windows open once per suite rather than once per test, and group
-  multiplayer tests together with `run_suite { tag: "multiplayer" }`.
+1. Check for Studio dialogs that require a response.
+2. If nodes are marked `orphan`, stop the test. Start it again through the MCP tool instead of F5.
+3. Use `stop_session` or Studio's **Stop** button. The daemon also ends sessions after 120 seconds without activity.
+4. During investigation, set `session.reuse: false`.
 
-**`UNKNOWN_ACTION game.*`** — the place does not register that hook, or the hooks package is not installed
-(in `examples/place` it is mapped by Rojo from `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks`). Run `list_actions { namespace: "game" }` while a session is live.
+**Test windows remain open**
+
+The daemon tries the edit node if `EndTest` does not finish within the time limit.
+If windows remain open, select **Stop** in Studio or close the client windows. The next run starts a new session.
+
+**Multiplayer windows receive keyboard focus**
+
+Client windows receive focus when they open. `VirtualInput` actions target the selected client and do not depend on operating-system focus.
+Do not type in Studio while a multiplayer session starts.
+Keep `session.reuse: true` to open windows once per suite. Use `run_suite { tag: "multiplayer" }` to group multiplayer tests.
+
+**`UNKNOWN_ACTION game.*`**
+
+The game has not registered the hook, or the hooks package is missing.
+The sample place maps `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks` with Rojo.
+During an active session, run `list_actions { namespace: "game" }` to check available hooks.

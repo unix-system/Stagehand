@@ -4,6 +4,11 @@ import { readFile } from 'node:fs/promises';
 import { renderCatalog } from './docs-catalog.mjs';
 
 const catalog = JSON.parse(await readFile(new URL('../schema/catalog.json', import.meta.url), 'utf8'));
+test('site wording requires review when its catalog source changes', () => {
+  const changed = structuredClone(catalog);
+  changed.entries.find(e => e.name === 'gui.click').summary = 'Changed API behavior.';
+  assert.throws(() => renderCatalog(changed), /Review reference wording/);
+});
 test('every catalog entry has one stable anchor and ordering is independent of input', () => {
   const pages = renderCatalog(catalog);
   assert.deepEqual(pages, renderCatalog({ ...catalog, entries: [...catalog.entries].reverse() }));

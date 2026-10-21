@@ -6,7 +6,7 @@ const namespaces = [...new Set<string>(catalog.entries.map((e: { name: string })
 
 export default defineConfig({
   title: 'Stagehand',
-  description: 'Declarative, agent-driven playtests for Roblox Studio.',
+  description: 'Write YAML playtests. Run them in Roblox Studio through an MCP server. Read results for each step.',
   base: '/Stagehand/',
   cleanUrls: false,
   srcExclude: ['architecture.md', 'implementation-brief.md'],
@@ -30,6 +30,6 @@ export default defineConfig({
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/unix-system/Stagehand' }],
     outline: [2, 3],
-    footer: { message: 'Made for the moments between “it should work” and “it does.”', copyright: 'Stagehand · MIT licensed' },
+    footer: { message: 'Automated playtests for Roblox Studio.', copyright: 'Stagehand · MIT license' },
   },
 });

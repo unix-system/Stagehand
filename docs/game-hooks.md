@@ -1,15 +1,18 @@
 # Game hooks
 
-Give playtests a small vocabulary for your game: `game.requestSpawn`, `game.inMatch`, or `game.reset`.
-Hooks call your real game modules through the optional `StagehandHooks` package and are discovered by the `list_actions` MCP tool while the game is running.
+Game hooks let playtests call functions in your game. Hook names include `game.requestSpawn`, `game.inMatch`, and `game.reset`.
+The optional `StagehandHooks` package connects these functions to Stagehand. The `list_actions` MCP tool lists available hooks while the game runs.
 
 ## Install the package
 
-The repository's [sample place](https://github.com/unix-system/Stagehand/tree/main/examples/place) maps `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks` through Rojo. You can use the same mapping in your project, or use the Wally dependency documented in the [package README](https://github.com/unix-system/Stagehand/blob/main/hooks/README.md).
+The [sample place](https://github.com/unix-system/Stagehand/tree/main/examples/place) uses Rojo to map `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks`.
+Use this mapping in your project. Alternatively, use the Wally dependency in the [package README](https://github.com/unix-system/Stagehand/blob/main/hooks/README.md).
 
 ## Register server actions and conditions
 
-Create a server Script such as `ServerScriptService/StagehandBindings.server.luau`. This example assumes your game has a `MatchState` module with `RequestSpawn`, `Reset`, and `active`; adapt those calls to your game.
+Create a server Script, for example `ServerScriptService/StagehandBindings.server.luau`.
+This example needs a `MatchState` module with `RequestSpawn`, `Reset`, and `active` members.
+Replace these calls with the functions and properties in your game.
 
 ```lua
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,11 +51,11 @@ steps:
   - { wait: game.inMatch, timeout: 5s }
 ```
 
-Register names without the `game.` prefix. Names must start with a letter or underscore and contain only letters, digits, or underscores.
+Register names without the `game.` prefix. Start each name with a letter or underscore. Use only letters, digits, and underscores.
 
 ## Actors and parameters
 
-Each callback receives `run(player, params)`. `player` is the selected Player, or `nil` when no actor is supplied; `params` is the step's JSON-compatible parameter map.
+Stagehand calls each function as `run(player, params)`. The `player` argument identifies the selected Player. It is `nil` if the step has no actor. The `params` argument contains the step parameters as JSON-compatible values.
 
 | Actor setting | Behavior |
 | --- | --- |
@@ -60,7 +63,7 @@ Each callback receives `run(player, params)`. `player` is the selected Player, o
 | `optional` (default) | Receives the selected player, or `nil`. |
 | `none` | Declares that the hook does not need a player. |
 
-Add a `params` JSON Schema table to describe parameters to agents. For example, an action accepting an amount can declare:
+Use a `params` JSON Schema table to describe parameters to agents. This example defines an integer parameter named `amount`:
 
 ```lua
 params = {
@@ -71,19 +74,19 @@ params = {
 }
 ```
 
-Read it as `params.amount` inside the callback. Avoid names shared with step modifiers (`as`, `on`, `timeout`, `within`, `soft`, `label`, `save`, `if`, `with`). If a hook needs such a parameter, put it under the step's `with` map.
+Read the value from `params.amount` in the callback. Do not use step modifier names for parameters. These names are `as`, `on`, `timeout`, `within`, `soft`, `label`, `save`, `if`, and `with`. If a parameter must use one of these names, put it in the step's `with` map.
 
-Actions may return a value for the step's `save` field. Conditions return a truthy or falsy value and can be used with `wait` or `expect`; keep them safe to evaluate repeatedly.
+An action can return a value for the step's `save` field. A condition returns a truthy or falsy value. Use conditions with `wait` or `expect`. Make sure that repeated condition checks do not change game state.
 
 ## Client hooks
 
-Call `Hooks.client({...})` from a LocalScript for client-side operations. It accepts the same hook definitions as `Hooks.server`. Register after the client modules your callbacks need are ready, and select the player with `as` in the playtest.
+For client operations, call `Hooks.client({...})` from a LocalScript. This function accepts the same definitions as `Hooks.server`. Register hooks after their required modules are ready. Set `as` in the playtest to select a player.
 
-Server hooks use the bridge at `ReplicatedStorage.StagehandHooks.Invoke`; client hooks use the local player's `PlayerScripts.StagehandHooks.Invoke`. Let Stagehand discover and route hooks through these bridges.
+Server hooks use the bridge at `ReplicatedStorage.StagehandHooks.Invoke`. Client hooks use `PlayerScripts.StagehandHooks.Invoke` under the local player. Stagehand uses these bridges to find and call hooks.
 
 ## Reset a reused session
 
-Register a server action named `reset` with `actor = "none"`, then select the hook reset policy:
+Register a server action named `reset` with `actor = "none"`. Then set the session reset policy:
 
 ```yaml
 session:
@@ -93,10 +96,10 @@ session:
   reset: hook
 ```
 
-When an existing session is reused, Stagehand calls `game.reset`. Make the callback restore the state your next test assumes. See the [session specification](spec.md) for other reset policies.
+When Stagehand reuses a session, it calls `game.reset`. Use this callback to restore the state that the next test needs. See the [session specification](spec.md) for other reset policies.
 
 ## Availability and troubleshooting
 
-The package creates its bridges only inside Studio by default. Keep that default for playtesting; `Hooks.enabledInLive` is an explicit opt-in for live games.
+By default, the package creates bridges only in Studio. Keep this setting for playtests. The `Hooks.enabledInLive` option permits bridges in live games.
 
-If `game.*` is missing, start a session, confirm the bindings Script or LocalScript runs, then call `list_actions` again. A registration error appears in the game's logs. Check module paths and ensure server/client registrations run on the correct side.
+If a hook is missing, start a session. Check that the bindings Script or LocalScript runs. Then call `list_actions` again. Check the game logs for registration errors. Check the module paths and the server or client context.
