@@ -1,8 +1,9 @@
-// Editorial check only: sentence length does not certify ASD-STE100 compliance.
+// Editorial regression checks; these do not certify ASD-STE100 compliance.
 import { readFile, readdir } from 'node:fs/promises';
 import { createMarkdownRenderer } from 'vitepress';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectProse, proseFromInline } from './docs-language-rules.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const md = await createMarkdownRenderer(root);
@@ -12,6 +13,7 @@ files.push(...(await readdir(path.join(root, 'docs/reference'))).filter(f => f.e
 let total = 0;
 let short = 0;
 let failed = false;
+let findings = 0;
 for (const file of files) {
   let text = await readFile(path.join(root, 'docs', file), 'utf8');
   const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -28,13 +30,15 @@ for (const file of files) {
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i].type !== 'inline' || tokens[i - 1]?.type === 'heading_open') continue;
     // Count a literal identifier or code expression as one technical unit.
-    const plain = (tokens[i].children ?? []).map(t => {
-      if (t.type === 'code_inline') return ' TECHNICALTERM ';
-      if (t.type === 'text') return t.content;
-      if (t.type === 'softbreak' || t.type === 'hardbreak') return ' ';
-      return '';
-    }).join('');
+    const plain = proseFromInline(tokens[i]);
     units.push(plain);
+  }
+  for (const unit of units) {
+    for (const finding of inspectProse(unit)) {
+      console.error(`${file}: ${finding.rule}: "${finding.match}". ${finding.advice}\n  ${unit}`);
+      findings++;
+      failed = true;
+    }
   }
   const sentences = units.flatMap(t => t.split(/(?<=[.!?])\s+(?=[A-Z0-9`])/)).filter(t => /[a-z]/i.test(t));
   const long = sentences.filter(s => s.trim().split(/\s+/).length > 20);
@@ -48,5 +52,6 @@ for (const file of files) {
 }
 console.log(`Total: ${short}/${total} units at most 20 words (${(short / total * 100).toFixed(1)}%).`);
 console.log('Scope: visible Markdown prose, table cells, and homepage copy. Excludes headings, code blocks, and raw schemas.');
-console.log('This checks sentence length only, not approved vocabulary, grammar, or full ASD-STE100 compliance.');
+console.log(`Vocabulary and grammar regression findings: ${findings}.`);
+console.log('These selected checks do not measure full ASD-STE100 compliance. See .github/STE-REVIEW.md for the manual review and scope.');
 if (failed) process.exitCode = 1;

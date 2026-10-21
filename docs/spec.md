@@ -1,8 +1,8 @@
 # Playtest spec (v1)
 
-A playtest is a file at `playtests/<name>.playtest.yaml`. YAML is the standard format; JSON is also accepted.
+A playtest is a file at `playtests/<name>.playtest.yaml`. YAML is the standard format. Stagehand also accepts JSON.
 Stagehand validates the file against `schema/playtest.schema.json`.
-It then checks action names, condition names, and parameters against `schema/catalog.json` and available `game.*` hooks.
+It then validates action names, condition names, and parameters against `schema/catalog.json` and available `game.*` hooks.
 
 ## Top-level fields
 
@@ -15,7 +15,7 @@ It then checks action names, condition names, and parameters against `schema/cat
 | `session.players` | integer 0..8 | `0` (or `1` if mode=play, `2` if mode=multiplayer) | |
 | `session.reuse` | boolean | `true` | keep the Studio session alive between runs |
 | `session.reset` | `respawn \| hook \| none` | `respawn` | applied before a run in a reused session |
-| `timeout` | duration | `60s` | time limit for the complete run (setup + steps + teardown) |
+| `timeout` | duration | `60s` | time limit for the full run (setup + steps + teardown) |
 | `failOnError` | boolean | `true` | any `error`-level Output on any node fails the active step |
 | `actors` | map name → `{ player: 1..8 }` | `p1..pN` | extra aliases; `p1..pN` always exist |
 | `vars` | map name → value | `{}` | referenced as `$name` |
@@ -48,7 +48,7 @@ For `do`, `wait`, and `expect`, other keys are parameters of the named action or
 | `wait` | condition name | block until true; fail at `timeout` |
 | `expect` | condition name | assert now; with `within`, poll until true for that long; failure aborts unless `soft` |
 | `lua` | string, or `{ code, returns? }` | Lua action. Runs on the resolved node with `actor, player, character, vars` in scope; return value can be `save`d |
-| `parallel` | array of branches; a branch is a step list or a single step | branches run concurrently, then join; first non-soft failure cancels the others |
+| `parallel` | array of branches; a branch is a step list or a single step | branches run at the same time, then join; the first non-soft failure cancels the others |
 | `each` | `{ actors: [names] \| "all", steps: [...] }` | run `steps` once per actor with `as` bound (sequentially, in listed order) |
 | `use` | fragment name | Insert a named step list (`fragments:` in this file, else `playtests/_shared/<name>.fragment.yaml`); modifiers: `as` (actor for steps that name none), `vars` (map substituted into the fragment's steps), `soft`, `label`, `if` |
 
@@ -63,12 +63,12 @@ Add a `label` to each Lua step. Without a label, the display shows `lua: <code�
 | `as` | actor name | all | which player the step is about / which client runs it |
 | `on` | `edit \| server \| client` | do/wait/expect/lua | override the context |
 | `timeout` | duration | do/wait/expect/lua | default `10s`; for `expect` only used with `within` as upper bound |
-| `within` | duration | expect | wait-then-assert window; absent = instant |
-| `soft` | boolean | all | failure is recorded, run continues |
+| `within` | duration | expect | wait-then-assert window; if omitted, compare immediately |
+| `soft` | boolean | all | Stagehand records the failure and continues the run |
 | `label` | string | all | display name in reports and the Studio progress widget; recommended for every `lua` step |
-| `save` | var name | do/lua | store the return value in `vars[save]`; vars are run-wide, so a `save` inside `each` is overwritten by every later actor (the last value remains) — read it inside the same iteration or use distinct names |
+| `save` | var name | do/lua | store the return value in `vars[save]`; vars are run-wide, so a `save` inside `each` is overwritten by every later actor (the last value stays) — read it inside the same iteration or use different names |
 | `if` | `"$var"` | all | skip (reported `step.skipped`, reason `if`) when the var is falsy (`nil`, `false`, `0`, `""`) |
-| `with` | map | do/wait/expect | params, merged over flat params; **required** for a param whose name is a modifier (`label`, `timeout`, `as`, …), which would otherwise be read as the modifier |
+| `with` | map | do/wait/expect | parameters that override flat parameters; necessary when a parameter name is also a modifier (`label`, `timeout`, `as`, …) |
 
 Actions such as `character.moveTo` use the step's `timeout` field. They do not have a separate timeout parameter.
 The report shows Lua return values and non-nil action return values, including without `save`.
@@ -81,7 +81,7 @@ Define a local fragment under `fragments:` in the playtest.
 To share a fragment, save it as `playtests/_shared/<name>.fragment.yaml` with `{ name, description?, steps }`.
 The name must match the file name and use lowercase words separated by hyphens.
 A local fragment takes priority over a shared fragment with the same name.
-Fragments can contain `use:` steps, with a nesting limit of 8. A fragment cannot reference itself.
+Fragments can contain `use:` steps, with a nesting limit of 8. A fragment cannot use itself.
 
 ```yaml
 fragments:
@@ -96,7 +96,7 @@ steps:
 Stagehand expands fragments at compile time. Expanded step IDs use `steps.N.use.<name>.i`.
 Steps inherit `as` when they have no actor. They also inherit `soft` from the `use` step.
 The `use` step's `vars` replace whole-value `$name` references first.
-The `if` field applies to the complete expansion.
+The `if` field applies to the full expansion.
 Stagehand does not replace fixed actor names in selectors, such as `@p1.gui`. Use a fixed actor only when required.
 
 ### Context resolution
@@ -114,7 +114,7 @@ Then the target node:
 | `server` | server node; actor bound to its `Player` | server node; no actor |
 | `edit` | edit node; actor ignored (warning) | edit node |
 
-Player-specific steps require `as` when `players` is 2 or more. These include `player.*`, `character.*`, `input.*`, and `gui.*`.
+Player-specific steps need `as` when `players` is 2 or more. These include `player.*`, `character.*`, `input.*`, and `gui.*`.
 With one player, the default actor is `p1`.
 Outside edit mode, this default also applies to optional actors in Lua steps and most game hooks.
 Thus, a server Lua step can use `player` and `character` in a one-player session.
@@ -137,7 +137,7 @@ Params with `format: selector` accept:
 
 A selector that ends with `[]` returns all matches. Otherwise, it returns the first match in depth-first child order.
 A condition must be true for all matched instances.
-No matches causes `RESOLVE_FAILED`, except for `instance.exists`, which returns false.
+If no instance matches, the step fails with `RESOLVE_FAILED`. The exception is `instance.exists`, which returns false.
 
 ```ebnf
 selector   = ( var | tag | actor | path ) [ "[]" ] ;
@@ -160,7 +160,7 @@ Filter values recognize numbers and `true` or `false`. Other filter values are s
 
 ## Values
 
-The catalog parameter schema controls value conversion. Values without a specified type remain JSON values.
+The catalog parameter schema controls value conversion. Values without a specified type keep their JSON form.
 
 | YAML value | Param schema | Roblox value |
 |---|---|---|

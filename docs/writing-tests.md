@@ -8,15 +8,15 @@ The examples use the [sample game](https://github.com/unix-system/Stagehand/tree
 
 A playtest is a list of steps. Each step has exactly one **verb**:
 
-| Verb | Think of it as | Fails when |
+| Verb | Function | Failure condition |
 |---|---|---|
-| `do: <action>` | "make this happen" | the action throws or exceeds `timeout` (default 10s) |
-| `wait: <condition>` | "block until this is true" | still false at `timeout` |
-| `expect: <condition>` | "this must be true now" (or within `within`) | false; aborts the run unless `soft: true` |
+| `do: <action>` | Do an action | the action throws or exceeds `timeout` (default 10s) |
+| `wait: <condition>` | Wait until the condition is true | still false at `timeout` |
+| `expect: <condition>` | Compare the condition now, or until the `within` time limit | false; aborts the run unless `soft: true` |
 | `lua: <code>` | run Lua code | the code errors |
-| `parallel:` / `each:` | run steps concurrently / once per actor | any non-soft branch fails |
+| `parallel:` / `each:` | run steps at the same time / once per actor | any non-soft branch fails |
 
-Use `do` to change game state. Use `wait` to wait for a condition. Use `expect` to check the result. Use `wait` instead of a fixed delay. To allow time for a result, use `expect` with `within`.
+Use `do` to change game state. Use `wait` to wait for a condition. Use `expect` to compare the actual result with the expected result. Use `wait` instead of a fixed delay. To give time for a result, use `expect` with `within`.
 
 ```yaml
 - { do: character.equipTool, as: p1, tool: Gun }                                   # act
@@ -32,12 +32,13 @@ Validation reports a missing required parameter if a modifier uses its name.
 
 The `label` field identifies a step in reports, `step.*` events, and the Studio progress widget.
 Add a label to each `lua` step. Without a label, the display shows `lua: <first line of code…>` and validation gives a warning.
+
 Labels also help identify repeated actions. For example, use `label: open the shop` and `label: buy the sword`.
 Labels are display text. Stagehand does not use them to match steps.
 
 ## Reuse steps with fragments
 
-Use a fragment when several tests need the same steps. Reference the fragment with `use:`. Changes to the fragment then apply to each test:
+Use a fragment when two or more tests need the same steps. Use `use:` to select the fragment. Changes to the fragment then apply to each test:
 
 ```yaml
 # playtests/_shared/spawn-via-menu.fragment.yaml
@@ -57,15 +58,15 @@ The `soft` and `if` fields apply to all steps in the fragment.
 Expanded step IDs have this format: `steps.0.use.spawn-via-menu.1`.
 A test's `fragments` map defines fragments for that file only. The `list_tests` tool lists shared fragments.
 
-## Where does a step run? (context rules in plain words)
+## Step context {#where-does-a-step-run-context-rules-in-plain-words}
 
 Stagehand selects a node for each step. You do not need RemoteEvents to send test steps between the client and server.
 
 1. If the step specifies `on`, Stagehand uses that context. The catalog entry must permit the context.
 2. Otherwise, Stagehand uses the catalog default. Most entries use the server. The `gui.*`, `input.*`, `remote.fire`, and `remote.invoke` entries use the client.
 3. The `as` field selects a player. Client steps run on that player's client. Server steps use that player's `Player` object.
-4. In edit mode, server steps run in the edit DataModel. Validation rejects steps that require a client.
-5. A `lua` step uses the server unless it specifies another context.
+4. In edit mode, server steps run in the edit DataModel. Validation rejects steps that need a client.
+5. A `lua` step uses the server unless it specifies a different context.
 
 Five routing examples (Play or Multiplayer session):
 
@@ -77,12 +78,12 @@ Five routing examples (Play or Multiplayer session):
 | `{ expect: instance.hasTag, target: "@p1.character", tag: Hostile }` | server | conditions default to server |
 | `{ lua: "return workspace.DistributedGameTime" }` | server, no actor | `lua` defaults to server |
 
-Player-specific steps require `as` when the session has two or more players. With one player, the default actor is `p1`.
-Stagehand groups consecutive steps for the same node into one request. Changes between nodes require additional requests.
+Player-specific steps need `as` when the session has two or more players. With one player, the default actor is `p1`.
+Stagehand groups consecutive steps for the same node into one request. Changes between nodes need more requests.
 
 ## Selector reference {#selectors-cheat-sheet}
 
-Any parameter documented as `format: selector` (usually `target`) accepts:
+A parameter with `format: selector` (usually `target`) accepts these forms:
 
 | You write | You get |
 |---|---|
@@ -121,8 +122,7 @@ Comparison conditions take `op` ∈ `eq ne gt gte lt lte contains matches` (`mat
 - `each: { actors: [p1, p2], steps: [...] }` repeats steps with `as` bound to each actor, in order. Use
   `actors: all` for every player.
 - `parallel:` runs branches at the same time and joins; a branch is one step or a list. The first
-  non-soft failure cancels the other branches. Use it for things that must overlap in time (two players
-  equipping at once), not as a speed-up.
+  non-soft failure cancels the other branches. Use it when actions must occur at the same time, such as two players who equip tools together.
 
 ```yaml
 session: { players: 2 }
@@ -145,15 +145,15 @@ Stagehand runs `setup` once per reused session. Before each subsequent run, `ses
 
 | `reset` | Does | Use when |
 |---|---|---|
-| `respawn` (default) | `LoadCharacter()` for every actor, clear captured logs | the game has no global state worth resetting |
+| `respawn` (default) | `LoadCharacter()` for every actor, clear captured logs | the next test does not need a reset of global game state |
 | `hook` | calls your `game.reset` hook | the game has match state, teams, rounds |
-| `none` | nothing | the test deliberately builds on the previous run |
+| `none` | nothing | the test needs the state from the previous run |
 
-If a test fails only after another test, check the reset procedure.
-Use a `game.reset` hook with `reset: hook` to restore the required state. Alternatively, set `reuse: false` for that test.
+If a test fails only after a different test, examine the reset procedure.
+Use a `game.reset` hook with `reset: hook` to restore the necessary state. As an alternative, set `reuse: false` for that test.
 Stagehand always runs `teardown`, including after a failure or cancellation. Set cleanup steps to `soft: true` to preserve the original failure.
 
-## Debugging a failed step from the report
+## Find the cause of a failed step {#debugging-a-failed-step-from-the-report}
 
 Each run saves files in `.stagehand/runs/<timestamp>-<name>/`. These files contain an NDJSON event log, a JSON result, and a Markdown summary.
 The `get_run` tool and `stagehand://runs/latest` resource return the same data.
@@ -173,11 +173,11 @@ A failure looks like this (from `failing-example`):
 
 Read it in this order:
 
-1. Read `error.code` to identify the failure type. `ASSERTION_FAILED` means a condition was false. `TIMEOUT` means the time limit expired. `RESOLVE_FAILED` means an actor or selector did not resolve. `BAD_PARAMS` means parameters are invalid. `UNKNOWN_ACTION` means an action is unavailable. `ACTION_ERROR` and `LUA_ERROR` indicate code errors.
+1. Read `error.code` to identify the failure type. See the [error codes](protocol.md#error-object) for their meanings.
 2. Compare `expected` and `actual` to find the difference in state.
 3. Read log events with the same `stepId`. With `failOnError: true`, an error log from any session node fails the active step.
-4. Read `hint`, if present. A failed immediate check can need `within: 2s` to allow replication or deferred handlers. An attribute set only on a client can need `on: client`.
-5. Use `run_steps` to repeat the failed steps. Without session settings, this tool reuses the current session. Set an expectation to `soft: true` to continue after failure. Use a labeled `lua` step to return state values when necessary. The report displays return values without a `save` field.
+4. Read `hint`, if present. A failed immediate check can need `within: 2s` to give time for replication or deferred handlers. An attribute set only on a client can need `on: client`.
+5. Use `run_steps` to repeat the failed steps. Without session settings, this tool reuses the current session. Set an expectation to `soft: true` to continue after failure. Use a labeled `lua` step to return state values when necessary. The report shows return values without a `save` field.
 
 After a non-soft failure, Stagehand marks later steps `skipped` with reason `aborted`. Teardown still runs.
 By default, `run_test` and `run_steps` return after 90 seconds, even if the run continues.
@@ -185,16 +185,16 @@ Use the returned `runId` with `get_run` or `tail_run` to read subsequent results
 
 Roblox reserves Escape and other menu keys. These keys do not reach the game through `input.key`.
 Use a menu button or game hook to close a menu.
-A server condition cannot read attributes set only on a client. Use `on: client` to check those attributes.
+A server condition cannot read attributes set only on a client. Use `on: client` to examine those attributes.
 
 ## Game hooks vs `lua`
 
 | Use a **game hook** (`game.*`) when | Use **`lua`** when |
 |---|---|
-| the test needs game logic (spawn, start a round, reset a match) | you need a a single diagnostic check or setup change |
+| the test needs game logic (spawn, start a round, reset a match) | you need a single diagnostic check or setup change |
 | the operation uses state in game modules | the code is three lines and not reused |
-| you want agents to discover it via `list_actions` (hooks include `desc`) | you are exploring before writing a hook |
-| it should keep working as the game's internals change | |
+| you want agents to find it through `list_actions` (hooks include `desc`) | you need to examine game state before you write a hook |
+| the game's implementation can change, but the test must stay the same | |
 
 Hooks use the game's module state through a BindableFunction. A hook's `require` call returns the same module tables that the game uses.
 A `lua` step runs under plugin identity. Its `require` call returns a separate copy of a game module.
@@ -209,7 +209,7 @@ Hooks.server({
 ```
 
 Server hooks receive `(player, params)`. The `player` argument is the actor's Player, or `nil` when there is no actor.
-For a hook that requires a player, set `actor = "required"`. Stagehand then supplies `p1` in a one-player session.
+For a hook that needs a player, set `actor = "required"`. Stagehand then supplies `p1` in a one-player session.
 With two or more players, validation rejects a step without `as`.
 Use condition hooks with `wait` or `expect`. For a Lua condition, use `{ expect: lua, code: "return …" }`.
 Lua conditions can access `actor`, `player`, `character`, and `vars`.
@@ -218,26 +218,26 @@ Do not use modifier names for hook parameters. If necessary, pass these paramete
 ## Test design rules {#anti-patterns}
 
 - Use `wait` or `expect` with `within` instead of a fixed delay.
-- Use `gui.click` to check a button interaction. Use `remote.fire` to check the remote itself.
-- Check server-owned state on the server. For replication tests, check both the server and client.
+- Use `gui.click` for a test of a button interaction. Use `remote.fire` for a test of the remote itself.
+- Examine server-owned state on the server. For replication tests, examine both the server and client.
 - Set `as` for player-specific steps in multiplayer tests.
 - Use actor selectors such as `@p1.character` instead of fixed player instance names.
 - Set cleanup steps to `soft: true`.
 - Move long or repeated Lua operations into game hooks.
 - Add a label to each `lua` step.
-- Use fragments for steps shared by several tests.
+- Use fragments for steps shared by two or more tests.
 - Put hook parameters that share a modifier name under `with`.
-- Make each test independent of test order. Reset the required state before the test.
-- Use specific paths or tags to avoid unintended selector matches.
+- Make each test independent of test order. Reset the necessary state before the test.
+- Use exact paths or tags to prevent incorrect selector matches.
 
 ## Agent workflow
 
-1. Use `stagehand_status` to check the connection.
+1. Use `stagehand_status` to examine the connection.
 2. Use `inspect` to find instance paths.
 3. Use `list_actions` to find actions and hooks.
 4. Write the YAML test.
 5. Use `validate_test` to find format and parameter errors.
 6. Correct the reported errors.
-7. Use `run_steps` to run the steps without saving them.
+7. Use `run_steps` to run unsaved steps.
 8. Use `save_test` to save the test.
-9. Use `run_test` to check the saved test. See [MCP tools](mcp.md).
+9. Use `run_test` to run the saved test. See [MCP tools](mcp.md).

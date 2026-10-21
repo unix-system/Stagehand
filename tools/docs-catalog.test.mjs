@@ -9,6 +9,17 @@ test('site wording requires review when its catalog source changes', () => {
   changed.entries.find(e => e.name === 'gui.click').summary = 'Changed API behavior.';
   assert.throws(() => renderCatalog(changed), /Review reference wording/);
 });
+test('parameter descriptions require review after changes or removal, without altering schemas', () => {
+  const changed = structuredClone(catalog);
+  const entry = changed.entries.find(e => e.name === 'player.giveTool');
+  entry.params.properties.tool.description = 'Changed parameter behavior.';
+  assert.throws(() => renderCatalog(changed), /Review parameter wording/);
+  delete entry.params.properties.tool;
+  assert.throws(() => renderCatalog(changed), /Review removed parameter wording/);
+  const page = renderCatalog(catalog).get('player.md');
+  assert.ok(page.includes('Stagehand searches ServerStorage'));
+  assert.ok(page.includes('Tool name searched in ServerStorage'));
+});
 test('every catalog entry has one stable anchor and ordering is independent of input', () => {
   const pages = renderCatalog(catalog);
   assert.deepEqual(pages, renderCatalog({ ...catalog, entries: [...catalog.entries].reverse() }));

@@ -1,9 +1,9 @@
 ---
 layout: home
-title: Automated playtests for Roblox Studio
+title: Automatic playtests for Roblox Studio
 hero:
   name: Stagehand
-  text: Automated playtests for Roblox Studio.
+  text: Automatic playtests for Roblox Studio.
   tagline: Write test steps in YAML. Use your coding agent to run them in Studio. Read the results for each step.
   image:
     src: /logo.svg
@@ -13,11 +13,11 @@ hero:
       text: Get Started
       link: /quickstart
     - theme: alt
-      text: View on GitHub
+      text: Read on GitHub
       link: https://github.com/unix-system/Stagehand
 features:
-  - title: Define test steps
-    details: Select player actions. Add conditions to check the results. Save the YAML files in your game project.
+  - title: Write test steps
+    details: Select player actions. Add conditions to examine the results. Save the YAML files in your game project.
     link: /writing-tests
     linkText: Write a playtest
   - title: Run tests from your agent
@@ -35,7 +35,7 @@ features:
 ## Example playtest
 
 This playtest uses the sample game in the repository. It assigns a team to a player and creates the player character.
-It then equips a tool and checks for a tag. The sample game supplies the `game.requestSpawn` hook.
+It then equips a tool and does a check for a tag. The sample game supplies the `game.requestSpawn` hook.
 
 ```yaml
 name: blue-team-gun-hostile
@@ -56,7 +56,7 @@ steps:
 ### How Stagehand runs a test
 
 Your coding agent sends the playtest to the Stagehand MCP server.
-The Studio plugin runs each step on an edit, server, or client node.
+The Studio plugin does each step on an edit, server, or client node.
 The plugin reports the result of each step.
 If a step fails, the report includes the cause and available logs.
 The report also includes expected and actual values when available.

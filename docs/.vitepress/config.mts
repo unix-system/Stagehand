@@ -30,6 +30,6 @@ export default defineConfig({
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/unix-system/Stagehand' }],
     outline: [2, 3],
-    footer: { message: 'Automated playtests for Roblox Studio.', copyright: 'Stagehand · MIT license' },
+    footer: { message: 'Automatic playtests for Roblox Studio.', copyright: 'Stagehand · MIT license' },
   },
 });

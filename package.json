@@ -14,7 +14,7 @@
     "docs:dev": "node tools/docs-catalog.mjs && vitepress dev docs",
     "docs:build": "node tools/docs-catalog.mjs && vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "docs:test": "node --test tools/docs-catalog.test.mjs",
+    "docs:test": "node --test tools/docs-catalog.test.mjs tools/docs-language.test.mjs",
     "docs:language": "node tools/docs-catalog.mjs && node tools/docs-language.mjs"
   },
   "devDependencies": {

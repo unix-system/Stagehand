@@ -26,7 +26,7 @@ export function renderCatalog(catalog) {
     groups.get(namespace).push(entry);
   }
   const pages = new Map();
-  let index = '# Actions and conditions\n\nThis reference is generated from the built-in catalog. Use actions with `do`, and conditions with `wait` or `expect`. Live `game.*` hooks are discovered by `list_actions`; see the [game-hooks guide](../game-hooks.md).\n\n';
+  let index = '# Actions and conditions\n\nThe built-in catalog supplies this reference. Use actions with `do`. Use conditions with `wait` or `expect`. Use `list_actions` to find live `game.*` hooks. See the [game-hooks guide](../game-hooks.md).\n\n';
   for (const [namespace, entries] of groups) {
     index += `- [${namespace}](${namespace}.md) — ${entries.length} entries\n`;
     let page = `# ${namespace}\n\nThis page lists built-in actions and conditions in the ${namespace} namespace.\n\n`;
@@ -39,11 +39,16 @@ export function renderCatalog(catalog) {
       if (properties.length) {
         page += '| Parameter | Required | Type | Description |\n| --- | --- | --- | --- |\n';
         for (const [name, spec] of properties) {
-          page += `| ${escapeText(name)} | ${e.params.required?.includes(name) ? 'Yes' : 'No'} | ${escapeText(spec.type ?? (spec.enum ? 'enum' : 'See schema'))} | ${escapeText(spec.description ?? spec.format ?? 'See schema below')} |\n`;
+          const parameterWording = wording?.parameters?.[name];
+          if (parameterWording && parameterWording.source !== spec.description) throw new Error(`Review parameter wording after catalog change: ${e.name}.${name}`);
+          page += `| ${escapeText(name)} | ${e.params.required?.includes(name) ? 'Yes' : 'No'} | ${escapeText(spec.type ?? (spec.enum ? 'enum' : 'See schema'))} | ${escapeText(parameterWording?.description ?? spec.description ?? spec.format ?? 'See schema below')} |\n`;
         }
         page += '\n';
       } else page += 'No named parameters.\n\n';
-      if (e.params) page += `::: details Complete parameter schema and constraints\n${jsonBlock(e.params)}\n:::\n\n`;
+      for (const name of Object.keys(wording?.parameters ?? {})) {
+        if (!Object.hasOwn(e.params?.properties ?? {}, name)) throw new Error(`Review removed parameter wording: ${e.name}.${name}`);
+      }
+      if (e.params) page += `::: details Full parameter schema and constraints\n${jsonBlock(e.params)}\n:::\n\n`;
       if (e.returns !== undefined) page += `### Return value\n\nUse \`save\` to store the result.\n\n${jsonBlock(e.returns)}\n\n`;
       if (e.notes) {
         const notes = e.notes === 'Uses the step `timeout` as its budget; no timeout param.'

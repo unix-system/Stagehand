@@ -5,47 +5,53 @@
   },
   "character.moveTo": {
     "source": "Humanoid:MoveTo and wait for MoveToFinished; fails if not reached within the step timeout. Client alternative: input.move.",
-    "summary": "Move the character with Humanoid:MoveTo. Wait for MoveToFinished. The step fails if the character does not arrive before timeout. For client input, use input.move."
+    "summary": "Move the character with Humanoid:MoveTo. Wait for MoveToFinished. The step fails if the character does not get to the target before timeout. For client input, use input.move."
   },
   "character.loaded": {
     "source": "Actor has a character with a Humanoid and HumanoidRootPart, parented to Workspace.",
-    "summary": "Check that the actor's character is in Workspace and contains a Humanoid and HumanoidRootPart."
+    "summary": "True if the actor's character is in Workspace and contains a Humanoid and HumanoidRootPart."
   },
   "character.alive": {
     "source": "Character loaded, Humanoid.Health > 0 and not in the Dead state.",
-    "summary": "Check that the character is loaded, has health above zero, and is not in the Dead state."
+    "summary": "True if the character is loaded, has health above zero, and is not in the Dead state."
   },
   "character.dead": {
     "source": "No character, Humanoid.Health <= 0, or the Humanoid is in the Dead state.",
-    "summary": "Check whether the character is absent, has health at or below zero, or is in the Dead state."
+    "summary": "True if there is no character, its health is zero or less, or its Humanoid is in the Dead state."
   },
   "character.near": {
     "source": "HumanoidRootPart within radius studs of to.",
-    "summary": "Check that the HumanoidRootPart is within the specified radius of the target position."
+    "summary": "True if the distance from the HumanoidRootPart to the target position is less than or equal to the radius."
   },
   "character.hasTool": {
     "source": "Actor has the tool (Backpack or character); with equipped: true, it must be in the character.",
-    "summary": "Check that the actor has the tool in the Backpack or character. With equipped: true, the tool must be in the character."
+    "summary": "True if the actor has the tool in the Backpack or character. With equipped: true, the tool must be in the character.",
+    "parameters": {
+      "tool": {
+        "source": "Tool name (searched in Backpack, then character) or selector",
+        "description": "A Tool name or selector. Stagehand searches the Backpack, then the character."
+      }
+    }
   },
   "input.click": {
     "source": "Mouse click at a GuiObject's centre (waits for it to appear and be visible, within the step timeout) / BasePart's screen position, or at a screen position. Moves the cursor along a short curve first (visualised in the client window).",
-    "summary": "Click the center of a GuiObject, a BasePart's screen position, or a specified screen position. For a GuiObject, wait until it is visible, within the step timeout. The cursor first follows a short curve, shown in the client window."
+    "summary": "Click the center of a GuiObject, a BasePart's screen position, or a specified screen position. For a GuiObject, wait until it is in view, up to the step timeout. The client window shows the cursor movement along a short curve."
   },
   "input.mouseMove": {
     "source": "Move the mouse to a screen position (moves the cursor along a short curve, visualised in the client window) or by a raw delta.",
-    "summary": "Move the mouse to a specified screen position or by a raw delta. Position-based movement follows a short curve shown in the client window."
+    "summary": "Move the mouse to a specified screen position or by a raw delta. For movement to a position, the client window shows a short curve."
   },
   "gui.click": {
     "source": "Wait for a GuiButton to appear and be visible (within the step timeout), then activate it with a VirtualInput click at its centre (the cursor glides there along a short curve, visualised in the client window).",
-    "summary": "Wait for a visible GuiButton within the step timeout. Then click its center with VirtualInput. The cursor follows a short curve shown in the client window."
+    "summary": "Wait for a GuiButton to come into view, up to the step timeout. Then click its center with VirtualInput. The client window shows the cursor movement along a short curve."
   },
   "gui.setText": {
     "source": "Wait for a TextBox to appear and be visible, set its Text and fire FocusLost(enterPressed=true).",
-    "summary": "Wait for a visible TextBox. Set its Text property. Then send FocusLost with enterPressed=true."
+    "summary": "Wait for a TextBox to come into view. Set its Text property. Then send FocusLost with enterPressed=true."
   },
   "gui.visible": {
     "source": "GuiObject and all ancestors Visible/Enabled, and on screen.",
-    "summary": "Check that the GuiObject is on screen. It and its ancestors must have the applicable Visible or Enabled property set."
+    "summary": "True if the GuiObject is on screen and it and its ancestors have the applicable Visible or Enabled property set."
   },
   "gui.text": {
     "source": "Compare a TextLabel/TextBox/TextButton Text.",
@@ -53,15 +59,33 @@
   },
   "remote.fire": {
     "source": "RemoteEvent:FireServer(args...) from the actor's client.",
-    "summary": "Call RemoteEvent:FireServer(args...) from the actor's client."
+    "summary": "Call RemoteEvent:FireServer(args...) from the actor's client.",
+    "parameters": {
+      "name": {
+        "source": "Remote name (searched recursively in ReplicatedStorage) or selector",
+        "description": "A remote name or selector. Stagehand searches all descendants of ReplicatedStorage."
+      }
+    }
   },
   "remote.invoke": {
     "source": "RemoteFunction:InvokeServer(args...) from the actor's client; returns the first result.",
-    "summary": "Call RemoteFunction:InvokeServer(args...) from the actor's client. Return the first result."
+    "summary": "Call RemoteFunction:InvokeServer(args...) from the actor's client. Return the first result.",
+    "parameters": {
+      "name": {
+        "source": "Remote name (searched recursively in ReplicatedStorage) or selector",
+        "description": "A remote name or selector. Stagehand searches all descendants of ReplicatedStorage."
+      }
+    }
   },
   "remote.fireClient": {
     "source": "RemoteEvent:FireClient(actorPlayer, args...).",
-    "summary": "Call RemoteEvent:FireClient(actorPlayer, args...)."
+    "summary": "Call RemoteEvent:FireClient(actorPlayer, args...).",
+    "parameters": {
+      "name": {
+        "source": "Remote name (searched recursively in ReplicatedStorage) or selector",
+        "description": "A remote name or selector. Stagehand searches all descendants of ReplicatedStorage."
+      }
+    }
   },
   "instance.addTag": {
     "source": "CollectionService:AddTag.",
@@ -73,7 +97,13 @@
   },
   "instance.clone": {
     "source": "Clone target into parent; returns the clone's path.",
-    "summary": "Copy the target into the specified parent. Return the new instance's path."
+    "summary": "Copy the target into the specified parent. Return the new instance's path.",
+    "parameters": {
+      "name": {
+        "source": "Rename the clone",
+        "description": "The name for the new instance."
+      }
+    }
   },
   "instance.call": {
     "source": "Call a method: target:method(args...); returns the first result.",
@@ -85,10 +115,84 @@
   },
   "log.matches": {
     "source": "Some captured Output line matches a Lua pattern.",
-    "summary": "Check whether a captured Output line matches the specified Lua pattern."
+    "summary": "True if a recorded Output line matches the specified Lua pattern.",
+    "parameters": {
+      "scope": {
+        "source": "all = every node in the session (evaluated by the daemon over log events since run start); node = the resolved node only",
+        "description": "all: the daemon uses log events from every session node after the start of the run. node: only the selected node."
+      }
+    }
   },
   "log.noErrors": {
     "source": "No error-level Output captured since run start.",
-    "summary": "Check that no error-level Output has been captured since the run started."
+    "summary": "True if Stagehand recorded no error-level Output after the start of the run.",
+    "parameters": {
+      "scope": {
+        "source": "all = every node in the session (evaluated by the daemon over log events since run start); node = the resolved node only",
+        "description": "all: the daemon uses log events from every session node after the start of the run. node: only the selected node."
+      }
+    }
+  },
+  "session.wait": {
+    "source": "Sleep for a fixed duration.",
+    "summary": "Wait for a fixed duration."
+  },
+  "session.addPlayers": {
+    "source": "Add simulated players to a multiplayer session (StudioTestService:AddPlayers). New clients get the next playerIndex.",
+    "summary": "Add simulated players to a multiplayer session with StudioTestService:AddPlayers. New clients get the next playerIndex.",
+    "parameters": {
+      "count": {
+        "source": "1..7, total players must stay <= 8",
+        "description": "An integer from 1 to 7. The total player count must be 8 or less."
+      }
+    }
+  },
+  "player.setTeam": {
+    "source": "Set the actor's Team by Teams child name.",
+    "summary": "Set the actor's Team. Use the name of a child in Teams."
+  },
+  "player.respawn": {
+    "source": "Respawn the actor (Player:LoadCharacter) and wait for the new character.",
+    "summary": "Call Player:LoadCharacter for the actor. Wait for the new character."
+  },
+  "player.giveTool": {
+    "source": "Clone a Tool into the actor's Backpack.",
+    "summary": "Copy a Tool into the actor's Backpack.",
+    "parameters": {
+      "tool": {
+        "source": "Tool name searched in ServerStorage, ReplicatedStorage, StarterPack (first match), or a selector",
+        "description": "A Tool name or selector. Stagehand searches ServerStorage, ReplicatedStorage, and StarterPack in that order. It uses the first match."
+      }
+    }
+  },
+  "player.onTeam": {
+    "source": "Actor's Team name equals team.",
+    "summary": "True if the actor's Team name equals the team parameter."
+  },
+  "character.equipTool": {
+    "source": "Equip a Tool from the actor's Backpack (Humanoid:EquipTool).",
+    "summary": "Equip a Tool from the actor's Backpack (Humanoid:EquipTool).",
+    "parameters": {
+      "tool": {
+        "source": "Tool name (searched in Backpack, then character) or selector",
+        "description": "A Tool name or selector. Stagehand searches the Backpack, then the character."
+      }
+    }
+  },
+  "input.key": {
+    "source": "Press a key via VirtualInput (down, hold, up).",
+    "summary": "Press a key through VirtualInput. Hold the key for the specified duration. Then release it."
+  },
+  "instance.destroy": {
+    "source": "Destroy the instance(s).",
+    "summary": "Remove the selected instances with Destroy."
+  },
+  "instance.exists": {
+    "source": "Selector matches at least one instance.",
+    "summary": "True if the selector matches one or more instances."
+  },
+  "instance.hasTag": {
+    "source": "Instance(s) have the CollectionService tag.",
+    "summary": "True if the selected instances have the CollectionService tag."
   }
 }

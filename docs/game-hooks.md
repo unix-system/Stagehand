@@ -6,7 +6,7 @@ The optional `StagehandHooks` package connects these functions to Stagehand. The
 ## Install the package
 
 The [sample place](https://github.com/unix-system/Stagehand/tree/main/examples/place) uses Rojo to map `hooks/src` to `ReplicatedStorage.Packages.StagehandHooks`.
-Use this mapping in your project. Alternatively, use the Wally dependency in the [package README](https://github.com/unix-system/Stagehand/blob/main/hooks/README.md).
+Use this mapping in your project. As an alternative, use the Wally dependency in the [package README](https://github.com/unix-system/Stagehand/blob/main/hooks/README.md).
 
 ## Register server actions and conditions
 
@@ -59,11 +59,11 @@ Stagehand calls each function as `run(player, params)`. The `player` argument id
 
 | Actor setting | Behavior |
 | --- | --- |
-| `required` | Uses `p1` automatically in a one-player session; requires an explicit actor with multiple players. |
+| `required` | Uses `p1` automatically in a one-player session; needs an explicit actor with multiple players. |
 | `optional` (default) | Receives the selected player, or `nil`. |
 | `none` | Declares that the hook does not need a player. |
 
-Use a `params` JSON Schema table to describe parameters to agents. This example defines an integer parameter named `amount`:
+Use a `params` JSON Schema table to give agents the parameter definitions. This example defines an integer parameter named `amount`:
 
 ```lua
 params = {
@@ -76,11 +76,11 @@ params = {
 
 Read the value from `params.amount` in the callback. Do not use step modifier names for parameters. These names are `as`, `on`, `timeout`, `within`, `soft`, `label`, `save`, `if`, and `with`. If a parameter must use one of these names, put it in the step's `with` map.
 
-An action can return a value for the step's `save` field. A condition returns a truthy or falsy value. Use conditions with `wait` or `expect`. Make sure that repeated condition checks do not change game state.
+An action can return a value for the step's `save` field. A condition returns a truthy or falsy value. Use conditions with `wait` or `expect`. Make sure that condition checks do not change the game state.
 
 ## Client hooks
 
-For client operations, call `Hooks.client({...})` from a LocalScript. This function accepts the same definitions as `Hooks.server`. Register hooks after their required modules are ready. Set `as` in the playtest to select a player.
+For client operations, call `Hooks.client({...})` from a LocalScript. This function accepts the same definitions as `Hooks.server`. Register hooks after their necessary modules load. Set `as` in the playtest to select a player.
 
 Server hooks use the bridge at `ReplicatedStorage.StagehandHooks.Invoke`. Client hooks use `PlayerScripts.StagehandHooks.Invoke` under the local player. Stagehand uses these bridges to find and call hooks.
 
@@ -96,10 +96,10 @@ session:
   reset: hook
 ```
 
-When Stagehand reuses a session, it calls `game.reset`. Use this callback to restore the state that the next test needs. See the [session specification](spec.md) for other reset policies.
+When Stagehand reuses a session, it calls `game.reset`. Use this callback to set the game state for the next test. See the [session specification](spec.md) for other reset policies.
 
 ## Availability and troubleshooting
 
 By default, the package creates bridges only in Studio. Keep this setting for playtests. The `Hooks.enabledInLive` option permits bridges in live games.
 
-If a hook is missing, start a session. Check that the bindings Script or LocalScript runs. Then call `list_actions` again. Check the game logs for registration errors. Check the module paths and the server or client context.
+If a hook is missing, start a session. Make sure that the bindings Script or LocalScript runs. Then call `list_actions` again. Examine the game logs for registration errors. Examine the module paths and the server or client context.

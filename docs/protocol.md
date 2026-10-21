@@ -6,7 +6,7 @@ Nodes attach to the broker, request commands, send results, and report events.
 | Item | Value |
 |---|---|
 | Base URL | `http://127.0.0.1:<port>/v1` |
-| Port | range `38491`–`38500`: the daemon binds the first free port in it (`--port` / `STAGEHAND_PORT` move the range start); the edit node attaches to every live daemon in the range (plugin setting `Stagehand.Port` moves its range start); server/client nodes attach only to the daemon that launched them (see "Several daemons and Studios") |
+| Port | range `38491`–`38500`: the daemon binds the first free port in it (`--port` / `STAGEHAND_PORT` move the range start); the edit node attaches to every live daemon in the range (plugin setting `Stagehand.Port` moves its range start); server/client nodes attach only to the daemon that launched them (see "Multiple daemons and Studio instances") |
 | Bind | `127.0.0.1` only |
 | Encoding | JSON, UTF-8, `Content-Type: application/json` |
 | `protocolVersion` | `1` (broker rejects a mismatch with `400 BAD_REQUEST`) |
@@ -38,15 +38,15 @@ Before `Execute*Async`, the edit node stores the session ID in `Stagehand.Sessio
 It clears these settings on `end_session`.
 A server or client node can attach without a session ID. The broker marks it `orphan` and sends no test steps.
 
-## Several daemons and Studios
+## Multiple daemons and Studio instances {#several-daemons-and-studios}
 
 Each MCP client runs a separate daemon. Multiple Studio windows can connect to these daemons.
 
 - A daemon selects the first available port in `38491`–`38500`. It reports the port in `stagehand_status` and `health`. It skips ports used by other processes.
 - The edit plugin keeps one node per port in the range. Each node retries attachment with backoff. Thus, every daemon can see every open Studio instance.
 - Use `--place` or `STAGEHAND_PLACE` to select a place ID or case-insensitive part of a place name. Without a selection, the daemon uses the most recently attached edit node. Status lists all edit nodes.
-- The test arguments contain the launching daemon's port. Server and client nodes connect only to that port. They use `Stagehand.SessionPort` if the arguments are unavailable. Another daemon cannot see or stop these nodes. Studio rejects another launch with `SESSION_ERROR` while a test is active. The edit node first allows up to 10 seconds for a stopping test to end.
-- A restarted daemon can reuse its previous port. A remaining session then reattaches as an untracked session. Before another launch, the daemon sends `end_session` to its server node. It waits up to 20 seconds for `session.ended`. The edit node's `RunService:Stop()` ends only Run mode. Play and multiplayer use separate DataModels.
+- The test arguments contain the launching daemon's port. Server and client nodes connect only to that port. They use `Stagehand.SessionPort` if the arguments are unavailable. A different daemon cannot see or stop these nodes. Studio rejects a new launch with `SESSION_ERROR` while a test is active. The edit node first waits up to 10 seconds for the previous test to stop.
+- A restarted daemon can reuse its previous port. A remaining session then reattaches as an untracked session. Before a new launch, the daemon sends `end_session` to its server node. It waits up to 20 seconds for `session.ended`. The edit node's `RunService:Stop()` ends only Run mode. Play and multiplayer use separate DataModels.
 - Every edit node in that Studio instance reports `session.ended`. Daemons ignore sessions that they do not own.
 
 ## Attach
@@ -95,10 +95,10 @@ The `instanceId` field distinguishes unpublished places, which all have `placeId
 
 ### playerIndex assignment
 
-1. Client nodes receive `playerIndex` 1..N in **attach order** within a session.
+1. Client nodes receive `playerIndex` 1..N in **attach order** in a session.
 2. When the server node emits `session.ready {players:[…]}` (order of `Players:GetPlayers()`), the broker
    **re-numbers** clients so that `playerIndex = i` ⇔ `players[i-1].userId` (match by userId, then name).
-3. No `run_segment` is dispatched for a session before `session.ready` and before all N clients are attached.
+3. The daemon sends `run_segment` only after `session.ready` and after all N clients attach.
    Nodes read their final index from `run_segment.steps[].actor.playerIndex`; they never need to store it.
 
 ### Actor → node resolution (done by the daemon at compile/dispatch time)
@@ -121,8 +121,8 @@ The broker limits the value to `[0, pollTimeoutMs]`. The default is `pollTimeout
 With `wait=0`, a queued command returns `200` immediately. Otherwise, the response is `204`.
 
 **Session nodes use short polling.** Studio limits simultaneous HttpService requests from a game server.
-In testing, server and relayed client long polls delayed other requests. Commands reached clients several seconds late.
-Server and client nodes therefore use `wait=0`.
+During tests, long polls from the server and relayed clients caused delays in other requests. Commands reached clients a few seconds late.
+Server and client nodes thus use `wait=0`.
 They poll immediately after a command, then every 100 ms for three seconds after the last command or result.
 When idle, they poll every 750 ms.
 The game server also limits HttpService to 500 requests per minute. Three nodes at 10 polls per second exhausted this limit in approximately 20 seconds.
@@ -137,11 +137,11 @@ Reattachment fails the old node's active commands with `SESSION_ERROR`. Edit nod
 ```
 
 After `204`, the node polls again. Most command types run one at a time.
-The node can run `run_segment`, `cancel`, and `ping` concurrently in separate coroutines while polling continues.
+The node can run `run_segment`, `cancel`, and `ping` at the same time in separate coroutines while the node continues to poll.
 
 The broker permits one active command per type on each node, except `run_segment`, `cancel`, and `ping`.
-For example, a second `eval` remains queued until the first returns or times out.
-Multiple segments can run concurrently on one node. Thus, parallel branches can send overlapping input to that node.
+For example, a second `eval` stays queued until the first returns or times out.
+Multiple segments can run at the same time on one node. Thus, parallel branches can send overlapping input to that node.
 Each segment has its own ID, variables, and cancellation flag.
 A log event uses the most recently started step that is still active on that node.
 
@@ -169,7 +169,7 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `eval` | any | `{ "code": string, "env": { "actor"?: Actor, "vars"?: object } }` | `{ "value": any, "logs": [LogEvent…] }` |
 | `launch_session` | edit | `{ "sessionId": string, "mode": "run" \| "play" \| "multiplayer", "players": 0..8 }` | `{ "accepted": true }` (immediately; readiness = `session.ready` event) |
 | `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed", "abandon"?: boolean }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string, "abandoned"?: boolean }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end. `abandon` (edit only): the daemon gave up on a launch whose server node never attached; the Launcher forgets that session (`current` → `null`, `last.result` = `"abandoned: …"`) so the next `launch_session` is not refused for a test Studio may never have started |
-| `launcher_status` | edit | `{}` | `{ "current": { sessionId, mode, players, port, startedAt } \| null, "last": { sessionId, ok, result, endedAt, elapsedMs } \| null }` — what the shared Launcher believes Studio is running (any daemon's test) |
+| `launcher_status` | edit | `{}` | `{ "current": { sessionId, mode, players, port, startedAt } \| null, "last": { sessionId, ok, result, endedAt, elapsedMs } \| null }` — the shared Launcher's active Studio test (any daemon's test) |
 | `add_players` | server | `{ "count": 1..7 }` | `{ "requested": 1 }` |
 | `ping` | any | `{}` | `{ "pong": true, "t": 1234.5 }` |
 | `progress` | edit, client | Progress snapshot (below) | `{}` |
@@ -213,9 +213,10 @@ Run mode uses the edit DataModel, so its plugin also hosts the server node.
 When `Execute*Async` returns, the edit node clears its settings unless a newer launch owns them.
 It then reports `session.ended`.
 
-An accepted launch has two time limits. The server node must attach within 30 seconds. The `session.ready` event must arrive within 60 seconds.
+An accepted launch has two time limits. The server node must attach in 30 seconds or less. The `session.ready` event must arrive in 60 seconds or less.
 Multiplayer limits are 1.5 times longer. Studio normally starts a test in 3–6 seconds.
 Background pauses, dialogs, or an unfinished previous session can delay launch.
+
 Either timeout causes `SESSION_ERROR`. The daemon sends `end_session` to the server, or to the edit node with `abandon: true`.
 
 The server reports `session.ready` after the expected players join and their characters load.
@@ -303,7 +304,7 @@ The daemon evaluates some steps without sending them to a node. It reports the s
 
 | Step | Daemon behaviour |
 |---|---|
-| `if: $var` (any step, `parallel`, `each`) | checked against the run's vars just before the step's segment would be dispatched; falsy (`null`, `false`, `0`, `""`, missing; same rule on nodes) → every step in scope is `skipped` with reason `if`; a step carrying `if` is dispatched as its own segment |
+| `if: $var` (any step, `parallel`, `each`) | the daemon compares this value with the run's variables immediately before it sends the step's segment; falsy (`null`, `false`, `0`, `""`, missing; same rule on nodes) → every step in scope is `skipped` with reason `if`; a step carrying `if` is dispatched as its own segment |
 | `wait`/`expect` `log.noErrors`, `log.matches` with `scope: all` (the default) | evaluated over the run's collected `log` events from every node of the session (after a 150 ms settle, polling until `timeoutMs`/`withinMs`) |
 | `log.*` with `scope: server` / `client` | sent to that node like any condition (node-side buffer, see above) |
 Node rules: execute steps in order; vars referenced as `$name` that were left unresolved are substituted from
@@ -342,7 +343,8 @@ Both the command result and `step.failed` event contain failure details.
 The result is the ordered response to the command. Events use a separate channel and can arrive later.
 Client nodes send events through the server.
 The daemon records the first response and fills missing fields from the second.
-The result's `vars` contains the complete variable map after the segment. The daemon merges these values.
+
+The result's `vars` contains the full variable map after the segment. The daemon merges these values.
 
 ### Cancel
 
@@ -385,14 +387,14 @@ The response acknowledges the sequence number, for example `{ "ack": 103 }`. The
 | `step.failed` | node | `…stepId`, `durationMs`, `reason` (string), `expected` (any), `actual` (any), `error` (ErrorObject) |
 | `step.skipped` | node or daemon | `…stepId`, `reason: "if" \| "aborted"` |
 | `log` | node (`LogService.MessageOut`) | `level: "info" \| "warn" \| "error"`, `message`, `node` (nodeId), `stepId \| null` |
-| `run.started` / `run.finished`, `step.cancelled` | daemon only (never on the wire; forwarded to MCP) | `runId`, `status?` |
+| `run.started` / `run.finished`, `step.cancelled` | daemon only (never in HTTP messages; forwarded to MCP) | `runId`, `status?` |
 
 The `catalogHash` is a lowercase SHA-1 hexadecimal value for the node's catalog entries, including live game hooks.
-Entries are sorted by name. Each line contains `name .. compactJson(params)`, and lines are joined with `"\n"`.
+The node sorts entries by name. Each line contains `name .. compactJson(params)`. The node joins lines with `"\n"`.
 The daemon stores this value per node and compares hashes only for equality.
 After `node.ready`, it always requests the full catalog.
 
-If `session.ended` identifies the current session, the daemon marks that session `ended`, unless it is already ending.
+If `session.ended` identifies the current session, the daemon marks that session `ended`, unless the session is in the `ending` state.
 It clears the current session and removes its server and client nodes.
 Removal rejects their active commands. An active `run_segment` fails its step with `SESSION_ERROR`.
 The next run starts a new session.
@@ -418,7 +420,7 @@ With `failOnError: true` the daemon fails the active step on any `log` with `lev
 }
 ```
 
-Session `state` ∈ `launching | ready | resetting | ending | ended`. A node is dropped after 60 s without a poll.
+Session `state` ∈ `launching | ready | resetting | ending | ended`. The daemon removes a node after 60 s without a poll.
 
 ## Error object
 
@@ -439,7 +441,7 @@ Session `state` ∈ `launching | ready | resetting | ending | ended`. A node is 
 | `ACTION_ERROR` | action threw; also set by the daemon when `failOnError` fails a step on an error log |
 | `ASSERTION_FAILED` | `expect` condition false |
 | `LUA_ERROR` | `lua` / `eval` code threw or failed to compile |
-| `SESSION_ERROR` | launch / end / add_players failed; set by the daemon when a node drops (expired, re-attached away, `session.ended`) while a command is in flight, or a session never becomes ready |
+| `SESSION_ERROR` | launch / end / add_players failed; set by the daemon when a node drops (expired, re-attached away, `session.ended`) while a command is active, or a session never becomes ready |
 | `EVAL_DISABLED` | `eval` while the daemon runs without `--allow-eval` (returned by the daemon, not nodes) |
 | `INTERNAL` | anything else |
 
