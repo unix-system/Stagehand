@@ -320,7 +320,7 @@ For Play or multiplayer, the alternative returns `ended: false`.
 The tool waits up to 20 seconds for Studio to confirm the stop through `studioStopped`.
 It can also stop an untracked test started by this daemon, if the test's server node is attached.
 Cancel an active run with `cancel_run` before you use this tool.
-With `force: true`, it can stop an attached test started manually or by a daemon that has restarted.
+With `force: true`, it can stop an attached test started manually or by a restarted daemon.
 Use the controlling daemon or Studio to stop a test that belongs to a different active daemon.
 
 | Argument | Type | Notes |

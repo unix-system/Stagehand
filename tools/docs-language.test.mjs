@@ -10,7 +10,7 @@ test('vocabulary checks distinguish approved noun uses from reviewed verb/adject
   }
 });
 test('grammar checks catch complex tenses, action gerunds, contractions and repeated articles', () => {
-  for (const text of ['It has been captured.', 'Studio is running a test.', 'After copying the file, restart Studio.', "It doesn't stop.", 'Use a a hook.']) {
+  for (const text of ['It has been captured.', 'The daemon has restarted.', 'Studio is running a test.', 'After copying the file, restart Studio.', "It doesn't stop.", 'Use a a hook.']) {
     assert.ok(inspectProse(text).some(f => f.rule.startsWith('grammar-')), text);
   }
   assert.deepEqual(inspectProse('The remaining steps use the missing parameter. The plugin is installed.'), []);

@@ -11,7 +11,7 @@ export const languageRules = [
     'Dictionary: use at the same time, thus, as an alternative, or need/necessary, according to meaning.'],
   ['vocabulary-within', /\bwithin\s+(?:the|a|an|\d)/gi,
     'Dictionary: use in for location; use before the time limit or in ... or less for duration.'],
-  ['grammar-perfect-progressive', /\b(?:(?:has|have|had) been|(?:is|are|was|were) being|(?:is|are|was|were) running)\b/gi,
+  ['grammar-perfect-progressive', /\b(?:(?:has|have|had) (?:been|restarted)|(?:is|are|was|were) being|(?:is|are|was|were) running)\b/gi,
     'Rules 3.2–3.4: use a simple tense or describe the state.'],
   ['grammar-action-ing', /\b(?:before|after|without)\s+(?:using|copying|saving|running|launching|writing|checking)\b/gi,
     'Rule 3.5: write a clause with a subject and a simple verb.'],

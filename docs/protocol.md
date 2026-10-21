@@ -168,7 +168,7 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 | `inspect` | any | `{ "path"?: string, "tag"?: string, "className"?: string, "depth": 1, "limit": 200 }` (exactly one of path/tag/className) | `{ "nodes": [InspectNode…], "truncated": false }` |
 | `eval` | any | `{ "code": string, "env": { "actor"?: Actor, "vars"?: object } }` | `{ "value": any, "logs": [LogEvent…] }` |
 | `launch_session` | edit | `{ "sessionId": string, "mode": "run" \| "play" \| "multiplayer", "players": 0..8 }` | `{ "accepted": true }` (immediately; readiness = `session.ready` event) |
-| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed", "abandon"?: boolean }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string, "abandoned"?: boolean }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end. `abandon` (edit only): the daemon gave up on a launch whose server node never attached; the Launcher forgets that session (`current` → `null`, `last.result` = `"abandoned: …"`) so the next `launch_session` is not refused for a test Studio may never have started |
+| `end_session` | server (edit fallback) | `{ "sessionId": string, "result"?: "passed" \| "failed", "abandon"?: boolean }` | `{ "ended": boolean, "via": "EndTest" \| "RunService.Stop", "reason"?: string, "abandoned"?: boolean }` — the edit fallback answers `ended: false` with a `reason` for a Play/multiplayer test, which `RunService:Stop()` cannot end. `abandon` (edit only): the daemon gave up on a launch whose server node never attached; the Launcher forgets that session (`current` → `null`, `last.result` = `"abandoned: …"`) so the next `launch_session` is not refused for a test with no confirmed start |
 | `launcher_status` | edit | `{}` | `{ "current": { sessionId, mode, players, port, startedAt } \| null, "last": { sessionId, ok, result, endedAt, elapsedMs } \| null }` — the shared Launcher's active Studio test (any daemon's test) |
 | `add_players` | server | `{ "count": 1..7 }` | `{ "requested": 1 }` |
 | `ping` | any | `{}` | `{ "pong": true, "t": 1234.5 }` |
@@ -176,7 +176,7 @@ A failed step is **not** a command error: `run_segment` returns `ok:true` with `
 
 The `progress` command updates the **Stagehand Progress** widget. The daemon sends snapshots to the newest edit node and each client in the session.
 It sends a snapshot when the session becomes ready, when steps change, and when the run ends.
-Step changes are combined into at most one update per 150 ms. Failed deliveries do not stop the run.
+The daemon combines step changes into at most one update per 150 ms. Failed deliveries do not stop the run.
 The edit widget serves the main window in Run mode and multiplayer. In Play, the main window uses the client DataModel.
 Each client has its own widget. The snapshot has this format:
 
@@ -280,12 +280,12 @@ The daemon's combined log collection for `scope: all` also applies to one run.
 | Step field | Type | Notes |
 |---|---|---|
 | `id` | string | stable path in the spec: `setup.N`, `steps.N`, `teardown.N`, nested `steps.4.parallel.1.0`, `steps.2.each.p2.1`, `steps.0.use.<fragment>.3` (a `use:` expansion) |
-| `verb` | `"do" \| "wait" \| "expect" \| "lua"` | `parallel`/`each` are compiled away by the daemon |
+| `verb` | `"do" \| "wait" \| "expect" \| "lua"` | the daemon expands `parallel`/`each` into steps |
 | `name` | string \| null | catalog name (`lua` for `wait: lua`/`expect: lua`); null for a `lua` verb |
 | `params` | object | `$var` already substituted where known at compile time; values still in JSON form (node coerces per catalog param type) |
 | `timeoutMs` | integer | time limit for a wait or action |
 | `withinMs` | integer \| null | `expect` only: poll until true for this long; null = instant check |
-| `soft` | boolean | failure is recorded but the segment continues |
+| `soft` | boolean | the node records the failure and continues the segment |
 | `actor` | `{name, playerIndex}` \| null | |
 | `label` | string \| null | display only |
 | `save` | string \| null | store the action's / lua's return value in `vars[save]` |
@@ -307,9 +307,9 @@ The daemon evaluates some steps without sending them to a node. It reports the s
 | `if: $var` (any step, `parallel`, `each`) | the daemon compares this value with the run's variables immediately before it sends the step's segment; falsy (`null`, `false`, `0`, `""`, missing; same rule on nodes) → every step in scope is `skipped` with reason `if`; a step carrying `if` is dispatched as its own segment |
 | `wait`/`expect` `log.noErrors`, `log.matches` with `scope: all` (the default) | evaluated over the run's collected `log` events from every node of the session (after a 150 ms settle, polling until `timeoutMs`/`withinMs`) |
 | `log.*` with `scope: server` / `client` | sent to that node like any condition (node-side buffer, see above) |
-Node rules: execute steps in order; vars referenced as `$name` that were left unresolved are substituted from
-`params.vars` + values saved earlier in this segment; on a non-soft failure stop and mark remaining steps
-`skipped` (reason `aborted`).
+
+The node does steps in order. It resolves remaining `$name` references from `params.vars` and values saved earlier in the segment.
+On a non-soft failure, the node stops. It marks the remaining steps `skipped` with reason `aborted`.
 
 Result:
 
