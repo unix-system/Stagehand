@@ -24,7 +24,7 @@ real files.
 | `schema/catalog.json` (actions/conditions, contexts, params) | loads for offline validation + routing | `Actions/*.luau` metas must match exactly; `tools/gen-catalog.luau` must reproduce the file byte-for-byte (2-space JSON, entries in file order) | uses names/params |
 | `schema/playtest.schema.json` + `docs/spec.md` | zod schema equivalent to the JSON Schema; compiler follows spec.md resolution rules | coercion table + selector grammar (spec.md) in `Resolve.luau` | every example validates |
 
-Key fixed values: port `38491` / `STAGEHAND_PORT`; long-poll 25 s; event flush 50 ms; daemon timeout = node
+Key fixed values: port `45491` / `STAGEHAND_PORT`; long-poll 25 s; event flush 50 ms; daemon timeout = node
 timeout + 2 s; idle session end 120 s; `protocolVersion: 1`; sessionId via
 `StudioTestService:GetTestArgs().stagehand.sessionId`, fallback plugin setting `Stagehand.Session`.
 

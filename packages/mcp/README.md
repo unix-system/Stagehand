@@ -1,7 +1,7 @@
 # stagehand-mcp
 
 The Stagehand daemon: an **MCP server** (stdio) for coding agents plus an **HTTP broker** on
-`127.0.0.1:38491` that the Stagehand Roblox Studio plugin attaches to. Agents write declarative YAML
+`127.0.0.1:45491` that the Stagehand Roblox Studio plugin attaches to. Agents write declarative YAML
 playtests; the daemon validates them, launches Studio test sessions (Run / Play / multiplayer), routes each
 step to the right DataModel (edit, server, client N), and returns pass/fail reports with expected/actual
 values and the Output logs around a failure.
@@ -29,7 +29,7 @@ node attaches to the broker automatically (plugin setting `Stagehand.Port` must 
 ## Run
 
 ```sh
-npx stagehand-mcp --root .              # MCP over stdio + broker on 127.0.0.1:38491
+npx stagehand-mcp --root .              # MCP over stdio + broker on 127.0.0.1:45491
 npx stagehand-mcp --root . --allow-eval # also enable the eval_lua tool
 npx stagehand-mcp --broker-only         # broker only, for debugging plugins (curl /v1/health)
 ```
@@ -37,7 +37,7 @@ npx stagehand-mcp --broker-only         # broker only, for debugging plugins (cu
 | Flag | Default | Meaning |
 |---|---|---|
 | `--root <dir>` | cwd | project dir: tests in `<root>/playtests/*.playtest.yaml`, reports in `<root>/.stagehand/runs/<ts>-<name>/` |
-| `--port <n>` | `$STAGEHAND_PORT` or `38491` | broker port |
+| `--port <n>` | `$STAGEHAND_PORT` or `45491` | broker port |
 | `--allow-eval` | off | enable `eval_lua` (arbitrary Luau in Studio) |
 | `--idle-timeout <dur>` | `120s` | end an idle reused Studio session (`0` = never) |
 

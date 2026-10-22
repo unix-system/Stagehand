@@ -150,11 +150,39 @@ local function main()
 				end
 			end,
 		})
+		-- One scanner probes the ports that have no attached node, one cheap request at a time. Per-port
+		-- nodes only start attaching once their port answers, so a range with no daemons costs a single
+		-- request stream instead of PORT_RANGE retry loops competing with the real attach for HttpService.
+		local transports, alive = {}, {}
+		for i = 0, Config.PORT_RANGE - 1 do
+			transports[i] = Http.new(basePort + i)
+			alive[i] = false
+		end
+		task.spawn(function()
+			while true do
+				for i = 0, Config.PORT_RANGE - 1 do
+					local node = nodes[i + 1]
+					if node and node.state ~= "attached" and not alive[i] then
+						local status = transports[i]:request("GET", "/health")
+						if status == 200 then
+							alive[i] = true
+						end
+					end
+				end
+				task.wait(2)
+			end
+		end)
 		for i = 0, Config.PORT_RANGE - 1 do
 			local node = Node.new({
 				role = "edit",
 				plugin = plugin,
-				transport = Http.new(basePort + i),
+				transport = transports[i],
+				canAttach = function()
+					return alive[i]
+				end,
+				onAttachFailed = function()
+					alive[i] = false
+				end,
 				version = Config.VERSION,
 				logCapture = LogCapture.new(),
 				launcher = launcher,

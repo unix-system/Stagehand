@@ -1,0 +1,6 @@
+
+
+[mcp_servers.stagehand]
+enabled = true
+command = "node"
+args = ["C:\\Users\\Thrawn\\Documents\\Projects\\Stagehand\\packages\\mcp\\dist\\index.js"]

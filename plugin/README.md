@@ -24,7 +24,7 @@ Copy `Stagehand.rbxm` into the Studio plugins folder (Studio: *Plugins → Plugi
 
 ## First run: HTTP permission
 
-The plugin talks to `http://127.0.0.1:38491` (the daemon broker). On the first request Studio asks
+The plugin talks to `http://127.0.0.1:45491` (the daemon broker). On the first request Studio asks
 whether *Stagehand* may access `127.0.0.1`: choose **Allow**. This is independent of the game's
 `HttpService.HttpEnabled`. If you denied it, re-enable it under *Plugins → Manage Plugins →
 Stagehand → Permissions*. Until the daemon is running the dock shows *connecting* and the node
@@ -49,7 +49,7 @@ retries with backoff (0.5 s … 10 s).
    (players from the test args; otherwise after 1.5 s without joins).
 4. A `410` from the broker makes the node re-attach (seq restarts at 1; unsent events are kept).
 
-Port: test args `stagehand.port`, else plugin setting `Stagehand.Port`, else `38491`. Keep the
+Port: test args `stagehand.port`, else plugin setting `Stagehand.Port`, else `45491`. Keep the
 daemon on the default unless you must change it (`STAGEHAND_PORT`); the edit node forwards its port
 into every session it launches.
 

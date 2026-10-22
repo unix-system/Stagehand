@@ -6,7 +6,7 @@ Nodes attach to the broker, request commands, send results, and report events.
 | Item | Value |
 |---|---|
 | Base URL | `http://127.0.0.1:<port>/v1` |
-| Port | range `38491`–`38500`: the daemon binds the first free port in it (`--port` / `STAGEHAND_PORT` move the range start); the edit node attaches to every live daemon in the range (plugin setting `Stagehand.Port` moves its range start); server/client nodes attach only to the daemon that launched them (see "Multiple daemons and Studio instances") |
+| Port | range `45491`–`45500`: the daemon binds the first free port in it (`--port` / `STAGEHAND_PORT` move the range start); the edit node attaches to every live daemon in the range (plugin setting `Stagehand.Port` moves its range start); server/client nodes attach only to the daemon that launched them (see "Multiple daemons and Studio instances") |
 | Bind | `127.0.0.1` only |
 | Encoding | JSON, UTF-8, `Content-Type: application/json` |
 | `protocolVersion` | `1` (broker rejects a mismatch with `400 BAD_REQUEST`) |
@@ -42,7 +42,7 @@ A server or client node can attach without a session ID. The broker marks it `or
 
 Each MCP client runs a separate daemon. Multiple Studio windows can connect to these daemons.
 
-- A daemon selects the first available port in `38491`–`38500`. It reports the port in `stagehand_status` and `health`. It skips ports used by other processes.
+- A daemon selects the first available port in `45491`–`45500`. It reports the port in `stagehand_status` and `health`. It skips ports used by other processes.
 - The edit plugin keeps one node per port in the range. Each node retries attachment with backoff. Thus, every daemon can see every open Studio instance.
 - Use `--place` or `STAGEHAND_PLACE` to select a place ID or case-insensitive part of a place name. Without a selection, the daemon uses the most recently attached edit node. Status lists all edit nodes.
 - The test arguments contain the launching daemon's port. Server and client nodes connect only to that port. They use `Stagehand.SessionPort` if the arguments are unavailable. A different daemon cannot see or stop these nodes. Studio rejects a new launch with `SESSION_ERROR` while a test is active. The edit node first waits up to 10 seconds for the previous test to stop.
@@ -128,7 +128,15 @@ When idle, they poll every 750 ms.
 The game server also limits HttpService to 500 requests per minute. Three nodes at 10 polls per second exhausted this limit in approximately 20 seconds.
 A throttled request can fail like a connection loss. Nodes preserve their IDs through poll failures.
 They reattach after 30 seconds of continuous failure or an HTTP `410` response.
-Reattachment fails the old node's active commands with `SESSION_ERROR`. Edit nodes continue to use long polling.
+Reattachment fails the old node's active commands with `SESSION_ERROR`.
+
+**Edit nodes use long polling only when they are active.** Studio limits simultaneous HTTP requests for all
+of its DataModels together. Each running daemon has one edit node, and each long poll holds a request for up
+to 25 seconds. With seven daemons, other requests waited 10 to 25 seconds in Studio before Studio sent them.
+Thus, an edit node uses long polling for 30 seconds after its last command or result. At other times, it uses
+`wait=0` every 2 seconds. The first command to an idle edit node can thus arrive up to 2 seconds late.
+If a poll from an edit node fails with `ConnectFail`, the daemon has stopped. The node then stops polling and
+waits until the port answers `GET /v1/health` again. Then it attaches with a new node ID.
 
 `200`:
 
@@ -409,7 +417,7 @@ With `failOnError: true` the daemon fails the active step on any `log` with `lev
 {
   "ok": true,
   "version": "0.1.0",
-  "port": 38491,
+  "port": 45491,
   "uptimeMs": 81234,
   "nodes": [
     { "nodeId": "n_1", "role": "edit", "placeId": 1234567890, "sessionId": null, "playerIndex": null, "playerName": null, "orphan": false, "lastSeenMs": 120 },

@@ -153,6 +153,102 @@ describe("Node", function()
 		eq(got.transport, tr)
 	end)
 
+	local function pollPaths(tr)
+		local out = {}
+		for _, r in ipairs(tr.requests) do
+			if r.path:sub(1, 5) == "/poll" then
+				table.insert(out, r.path)
+			end
+		end
+		return out
+	end
+
+	it("idle edit nodes short-poll; a command switches them to long polls for EDIT_ACTIVE_WINDOW", function()
+		Setup.world()
+		local window, interval = Node.EDIT_ACTIVE_WINDOW, Node.EDIT_IDLE_POLL_INTERVAL
+		Node.EDIT_ACTIVE_WINDOW, Node.EDIT_IDLE_POLL_INTERVAL = 0.3, 0.2
+		local tr = fakeTransport()
+		local node = Node.new({ role = "edit", transport = tr, version = "0.1.0" })
+		node:start()
+		task.wait(0.5)
+		local idle = pollPaths(tr)
+		truthy(#idle >= 2 and #idle <= 4, "idle polls are spaced: " .. #idle)
+		for _, p in ipairs(idle) do
+			truthy(p:find("&wait=0", 1, true) ~= nil, "idle poll is short: " .. p)
+		end
+		table.insert(tr.commands, { id = "c_1", type = "ping", params = {} })
+		truthy(
+			waitFor(function()
+				return #tr.results >= 1
+			end, 2),
+			"ping answered"
+		)
+		task.wait(0.1)
+		local after = pollPaths(tr)
+		truthy(after[#after]:find("&wait=0", 1, true) == nil, "long poll after a command: " .. after[#after])
+		task.wait(0.6)
+		after = pollPaths(tr)
+		truthy(after[#after]:find("&wait=0", 1, true) ~= nil, "short again once idle: " .. after[#after])
+		node:stop()
+		Node.EDIT_ACTIVE_WINDOW, Node.EDIT_IDLE_POLL_INTERVAL = window, interval
+	end)
+
+	it("an edit node whose daemon refuses connections hands the port back to the scanner", function()
+		Setup.world()
+		local interval = Node.EDIT_IDLE_POLL_INTERVAL
+		Node.EDIT_IDLE_POLL_INTERVAL = 0.05
+		local tr = fakeTransport()
+		local alive, failedCalls = true, 0
+		local request = tr.request
+		function tr:request(method, path, body)
+			if path:sub(1, 5) == "/poll" and self.dead then
+				table.insert(self.requests, { method = method, path = path })
+				return 0, nil, "HttpError: ConnectFail"
+			end
+			return request(self, method, path, body)
+		end
+		local node = Node.new({
+			role = "edit",
+			transport = tr,
+			version = "0.1.0",
+			canAttach = function()
+				return alive
+			end,
+			onAttachFailed = function()
+				failedCalls += 1
+				alive = false
+			end,
+		})
+		node:start()
+		truthy(
+			waitFor(function()
+				return node.state == "attached"
+			end, 1),
+			"attached"
+		)
+		tr.dead = true
+		truthy(
+			waitFor(function()
+				return failedCalls == 1
+			end, 1),
+			"onAttachFailed called"
+		)
+		task.wait(0.2)
+		eq(node.nodeId, nil)
+		eq(node.state, "connecting")
+		eq(tr.attaches, 1) -- gated until the scanner sees the port alive again
+		tr.dead = false
+		alive = true
+		truthy(
+			waitFor(function()
+				return tr.attaches == 2 and node.state == "attached"
+			end, 2),
+			"re-attached once the port answers"
+		)
+		node:stop()
+		Node.EDIT_IDLE_POLL_INTERVAL = interval
+	end)
+
 	-- Fake Players service: the Lune stub has no GetPlayers/PlayerAdded.
 	local function fakePlayers(list)
 		local signal = {

@@ -111,7 +111,7 @@ function waitForRunEvent(run: Run, ms: number): Promise<void> {
 function nodeHint(d: Daemon): string | undefined {
   if (d.brokerError) return d.brokerError;
   const edits = d.registry.edits();
-  if (edits.length === 0) return "No Roblox Studio edit node is attached. Open the place in Studio with the Stagehand plugin installed and enabled (the plugin scans ports 38491-38500; set Stagehand.Port if the daemon runs elsewhere).";
+  if (edits.length === 0) return "No Roblox Studio edit node is attached. Open the place in Studio with the Stagehand plugin installed and enabled (the plugin scans ports 45491-45500; set Stagehand.Port if the daemon runs elsewhere).";
   if (edits.length > 1) {
     const chosen = edits.find((e) => e.selected);
     return `${edits.length} Studios are attached; driving "${chosen?.placeName ?? "?"}" (${chosen?.placeId ?? "?"})${d.place ? ` as selected by --place ${d.place}` : " (most recent; start the daemon with --place <id|name> to pin one)"}.`;

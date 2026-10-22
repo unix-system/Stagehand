@@ -26,7 +26,7 @@ The **Stagehand** toolbar button opens the dock widget. The widget contains the 
 
 ## HTTP permission prompt
 
-The plugin connects to `http://127.0.0.1:38491`–`38500`.
+The plugin connects to `http://127.0.0.1:45491`–`45500`.
 The `Stagehand.Port` plugin setting and `STAGEHAND_PORT` daemon variable change the range start.
 Studio asks for permission to access `127.0.0.1`. Select **Allow**.
 This permission applies to the plugin and host. It does not depend on `HttpService.HttpEnabled` in Game Settings.
@@ -108,9 +108,9 @@ If client nodes do not load, Stagehand uses an injected client runtime with the 
 1. Make sure that the MCP client runs `stagehand-mcp`.
 2. Examine the daemon's `STAGEHAND_PORT` and the plugin's `Stagehand.Port` settings.
 3. Examine localhost access permissions.
-4. Find if a different process uses port 38491.
+4. Find if a different process uses port 45491.
 5. If needed, select an available port range for both the daemon and plugin.
-6. Run `curl http://127.0.0.1:38491/v1/health` to examine the broker.
+6. Run `curl http://127.0.0.1:45491/v1/health` to examine the broker.
 
 **Session does not start** (`launching` persists or a step reports `SESSION_ERROR`)
 

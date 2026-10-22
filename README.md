@@ -24,7 +24,7 @@ steps:
 1. Build the daemon: `pnpm install && pnpm build` (Node 20+, pnpm 10). This produces the `stagehand-mcp`
    binary at `packages/mcp/dist/index.js`.
 2. Register it with your agent, from your game's project directory, e.g.
-   `claude mcp add stagehand -- node /path/to/Stagehand/packages/mcp/dist/index.js` (broker port `38491`,
+   `claude mcp add stagehand -- node /path/to/Stagehand/packages/mcp/dist/index.js` (broker port `45491`,
    override with `--port` or `STAGEHAND_PORT`; add `--allow-eval` to enable `eval_lua`). See [docs/mcp.md](docs/mcp.md).
 3. Build and install the Studio plugin: `rojo build plugin --plugin Stagehand.rbxm` (or
    `rojo build plugin -o Stagehand.rbxm` and copy it into your plugins folder). Allow localhost HTTP when

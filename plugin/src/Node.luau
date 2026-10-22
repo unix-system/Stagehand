@@ -26,6 +26,8 @@ Node.FLUSH_INTERVAL = 0.05
 Node.SHORT_POLL_INTERVAL = 0.1 -- session nodes: re-poll delay when nothing is queued
 Node.ACTIVE_WINDOW = 3 -- seconds after a command/result during which session nodes poll at SHORT_POLL_INTERVAL
 Node.IDLE_POLL_INTERVAL = 0.75 -- session nodes: re-poll delay once idle for ACTIVE_WINDOW
+Node.EDIT_ACTIVE_WINDOW = 30 -- seconds after a command/result during which edit nodes long-poll
+Node.EDIT_IDLE_POLL_INTERVAL = 2 -- edit nodes: short-poll delay once idle for EDIT_ACTIVE_WINDOW
 Node.REATTACH_AFTER = 30 -- seconds of continuous poll failures before re-attaching under a new node id
 Node.MAX_QUEUE = 5000
 Node.SESSION_QUIET = 1.5 -- seconds without PlayerAdded before session.ready when the count is unknown
@@ -57,6 +59,10 @@ function Node.new(opts: { [string]: any })
 		version = opts.version or "0.1.0",
 		logCapture = opts.logCapture,
 		launcher = opts.launcher,
+		-- Optional attach gate (edit nodes): `canAttach()` false = no daemon known on this transport, so wait
+		-- without sending requests; `onAttachFailed()` tells the owner the daemon went away.
+		canAttach = opts.canAttach,
+		onAttachFailed = opts.onAttachFailed,
 		-- Studio-only UI shared between the nodes of one DataModel ({ progressUI }); a node given no
 		-- shared table owns its own and destroys it on stop.
 		ui = opts.ui or {},
@@ -234,7 +240,15 @@ function Node:_attachLoop(): boolean
 	local backoff = 0.5
 	self:_setState("connecting", self.lastError)
 	while self.running do
+		if self.canAttach and not self.canAttach() then
+			-- the shared scanner probes dead ports; this node stays silent until it finds a daemon
+			task.wait(0.5)
+			continue
+		end
 		local ok, err = self:_attachOnce()
+		if not ok and self.onAttachFailed then
+			self.onAttachFailed()
+		end
 		if ok then
 			self._lastActivity = Env.clock()
 			-- seq restarts at 1 per attach; unsent events are renumbered after node.ready
@@ -281,10 +295,10 @@ function Node:_pollLoop(gen: number)
 	local task = Env.task()
 	local failures = 0
 	local firstFailure = nil
-	-- Session nodes short-poll (docs/protocol.md "Session nodes short-poll"): a Studio game server caps
-	-- concurrent HTTP requests, and held long-polls starved the relayed client traffic.
-	local short = self.role ~= "edit"
-	local query = if short then "&wait=0" else ""
+	-- Short polls (docs/protocol.md "Poll and commands"): Studio caps concurrent HTTP requests across every
+	-- DataModel, and held long-polls (one edit node per running daemon) queued all other requests.
+	-- Session nodes always short-poll; edit nodes long-poll only while their daemon is sending commands.
+	local edit = self.role == "edit"
 	while self.running and gen == self._generation do
 		if not self.nodeId then
 			if not self:_attachLoop() then
@@ -292,16 +306,21 @@ function Node:_pollLoop(gen: number)
 			end
 			failures = 0
 		end
+		local short = not edit or Env.clock() - (self._lastCommand or -math.huge) > Node.EDIT_ACTIVE_WINDOW
+		local query = if short then "&wait=0" else ""
 		local status, data, err = self.transport:request("GET", "/poll?node=" .. tostring(self.nodeId) .. query)
 		if status == 200 and type(data) == "table" and type(data.command) == "table" then
 			failures = 0
 			firstFailure = nil
 			self._lastActivity = Env.clock()
+			self._lastCommand = self._lastActivity
 			self:_dispatch(data.command)
 		elseif status == 204 or status == 200 then
 			failures = 0
 			firstFailure = nil
-			if short then
+			if short and edit then
+				task.wait(Node.EDIT_IDLE_POLL_INTERVAL)
+			elseif short then
 				-- Fast while commands are flowing, slow when idle: all session nodes share one game server's
 				-- HttpService budget (500 requests/min), and 10 polls/s per node blew through it mid-run.
 				local idle = Env.clock() - (self._lastActivity or 0) > Node.ACTIVE_WINDOW
@@ -309,6 +328,11 @@ function Node:_pollLoop(gen: number)
 			end
 		elseif status == 410 then
 			self:_reattach("poll: unknown node")
+		elseif status == 0 and self.onAttachFailed and string.find(tostring(err), "ConnectFail", 1, true) then
+			-- Nothing listens on the port: the daemon exited. Hand the port back to the scanner instead of
+			-- retrying (each refused localhost connect holds an HTTP slot for ~2 s).
+			self.onAttachFailed()
+			self:_reattach("daemon unreachable: " .. tostring(err))
 		else
 			-- Transient failures (including HttpService throttling) keep the node id: re-attaching would
 			-- make the daemon cancel the command in flight. Only a sustained outage re-attaches.
@@ -381,6 +405,7 @@ function Node:_postResult(commandId: string, ok: boolean, payload: any)
 		body.error = payload
 	end
 	self._lastActivity = Env.clock()
+	self._lastCommand = self._lastActivity
 	for attempt = 1, 3 do
 		local status = self.transport:request("POST", "/result", body)
 		if status == 200 or status == 404 then

@@ -1,7 +1,7 @@
 --!strict
 return {
 	VERSION = "0.1.0",
-	DEFAULT_PORT = 38491,
+	DEFAULT_PORT = 45491,
 	-- The daemon binds the first free port in [port, port + PORT_RANGE); the edit node keeps a node per
 	-- port in that range so every running daemon (one per MCP client) sees this Studio.
 	PORT_RANGE = 10,

@@ -1,7 +1,7 @@
 # MCP server (`stagehand-mcp`)
 
 `stagehand-mcp` is a stdio MCP server and HTTP broker. The Studio plugin connects to this broker.
-The daemon selects the first available port in `127.0.0.1:38491`–`38500`. The `STAGEHAND_PORT` variable changes the range start.
+The daemon selects the first available port in `127.0.0.1:45491`–`45500`. The `STAGEHAND_PORT` variable changes the range start.
 Each MCP client can run a separate daemon. Each daemon can see all open Studio instances.
 Use `--place` to select a Studio instance. The [architecture document](https://github.com/unix-system/Stagehand/blob/main/docs/architecture.md#mcp-surface-packagesmcpsrcserver) defines the MCP interface.
 
@@ -27,7 +27,7 @@ or commit a project-scoped `.mcp.json`:
     "stagehand": {
       "command": "npx",
       "args": ["stagehand-mcp"],
-      "env": { "STAGEHAND_PORT": "38491" }
+      "env": { "STAGEHAND_PORT": "45491" }
     }
   }
 }
@@ -53,7 +53,7 @@ Set the root with `--root`. The default is the daemon's working directory.
 | Flag | Meaning |
 |---|---|
 | `--root <dir>` | project dir (tests in `<root>/playtests`, runs in `<root>/.stagehand/runs`; default cwd) |
-| `--port <n>` | start of the broker port range (default `$STAGEHAND_PORT` or 38491); the first free port in `n`..`n+9` is used |
+| `--port <n>` | start of the broker port range (default `$STAGEHAND_PORT` or 45491); the first free port in `n`..`n+9` is used |
 | `--place <id\|name>` | Studio instance to use when multiple instances are open: a placeId or a case-insensitive substring of the place name (default `$STAGEHAND_PLACE`, else the most recently attached Studio) |
 | `--allow-eval` | enable the `eval_lua` tool |
 | `--idle-timeout <dur>` | end idle Studio sessions after this long (default 120s; 0 = never) |

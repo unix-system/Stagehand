@@ -56,7 +56,7 @@ accepted), Roblox toolchain **Rojo + Wally + Lune**.
 Three deliverables:
 
 1. **`stagehand-mcp`** (TypeScript, `packages/mcp`): MCP server over stdio + local HTTP **broker** on
-   `127.0.0.1:38491` (configurable) + **engine** (compile spec → plan → dispatch segments → report) +
+   `127.0.0.1:45491` (configurable) + **engine** (compile spec → plan → dispatch segments → report) +
    **stores** (tests on disk, run history).
 2. **`stagehand-plugin`** (Luau, Rojo → `Stagehand.rbxm`, `plugin/`): one plugin, one entry script. On load
    it detects its DataModel kind and becomes an **edit**, **server** or **client** node. Edit node also shows
@@ -346,7 +346,7 @@ Record results here (Studio version, OS, date). Gate: if (b) fails, enable `Tran
 - [ ] **(c)** `StudioTestService:GetTestArgs()` readable from plugin context in server and client DataModels.
   - Result:
   - Notes:
-- [ ] **(d)** `HttpService:RequestAsync` to `http://127.0.0.1:38491` from the plugin in each DataModel (note permission prompt behaviour per DataModel).
+- [ ] **(d)** `HttpService:RequestAsync` to `http://127.0.0.1:45491` from the plugin in each DataModel (note permission prompt behaviour per DataModel).
   - Result:
   - Notes:
 - [ ] **(e)** `UserInputService:CreateVirtualInput()` from plugin context in a client DataModel moves the character.

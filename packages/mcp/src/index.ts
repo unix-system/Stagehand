@@ -48,8 +48,9 @@ async function main(): Promise<void> {
     allowEval: values["allow-eval"],
     sessions: values["idle-timeout"] !== undefined ? { idleTimeoutMs: parseDuration(numOrDur(values["idle-timeout"])) } : undefined,
   });
-  await daemon.start().catch(() => {
-    /* reported via stagehand_status; MCP keeps serving offline tools */
+  await daemon.start().catch((e) => {
+    // also reported via stagehand_status; MCP keeps serving offline tools
+    process.stderr.write(`stagehand-mcp: broker not listening: ${daemon.brokerError ?? (e as Error).message}\n`);
   });
   if (values["broker-only"]) return;
   const server = createMcpServer(daemon);
